@@ -38,3 +38,26 @@ test('标记已结清后，余额同步减少', () => {
   syncReceivablePayableBalances(db);
   assert.strictEqual(db.prepare('SELECT balance FROM accounts WHERE id=?').get(accId).balance, 0);
 });
+
+test('report：总资产含应收，总负债含应付', async () => {
+  const { report } = await import('../src/domain/report.js');
+  const db = memDb();
+  // 普通资产 10000
+  db.prepare("INSERT INTO accounts (name, type, balance) VALUES ('现金','asset',1000000)").run();
+  // 应收账户
+  const r = db.prepare("INSERT INTO accounts (name, type, balance) VALUES ('应收款','receivable',0)").run();
+  db.prepare("INSERT INTO receivable_payable_items (account_id, name, amount, date, status) VALUES (?,?,?,?, 'open')").run(r.lastInsertRowid, '张洪亮', 5000000, '2024-10-07');
+  syncReceivablePayableBalances(db);
+  // 应付账户
+  const p = db.prepare("INSERT INTO accounts (name, type, balance) VALUES ('借款','payable',0)").run();
+  db.prepare("INSERT INTO receivable_payable_items (account_id, name, amount, date, status) VALUES (?,?,?,?, 'open')").run(p.lastInsertRowid, '爱玲彩礼', 2000000, '2025-01-13');
+  syncReceivablePayableBalances(db);
+
+  const rep = report(db);
+  // 总资产 = 现金10000 + 应收50000 = 60000 元 = 6000000 分
+  assert.strictEqual(rep.totalAsset, 6000000);
+  // 总负债 = 应付20000 元 = 2000000 分
+  assert.strictEqual(rep.totalLiability, 2000000);
+  // 净资产 = 60000 - 20000 = 40000 元 = 4000000 分
+  assert.strictEqual(rep.netAsset, 4000000);
+});

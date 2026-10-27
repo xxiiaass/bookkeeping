@@ -17,7 +17,9 @@ export function report(db, { month } = {}) {
   }
 
   // 应收计入资产，应付计入负债（口袋记账口径）
-  const netAsset = totalAsset - totalLiability + receivable - payable;
+  const totalAssetInclReceivable = totalAsset + receivable;
+  const totalLiabilityInclPayable = totalLiability + payable;
+  const netAsset = totalAssetInclReceivable - totalLiabilityInclPayable;
 
   let monthly = { income: 0, expense: 0, balance: 0 };
   let byCategory = { income: [], expense: [] };
@@ -41,8 +43,8 @@ export function report(db, { month } = {}) {
   }
 
   return {
-    totalAsset,
-    totalLiability,
+    totalAsset: totalAssetInclReceivable,      // 含应收
+    totalLiability: totalLiabilityInclPayable, // 含应付
     receivable,
     payable,
     netAsset,
