@@ -1,5 +1,11 @@
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getApiToken, getWebPassword, login, apiAuth, setSettingValue, checkSession } from '../auth.js';
+import { sendBackup } from '../backup.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', 'data', 'zhangben.db');
 
 // 网页 session 鉴权（cookie）
 function webAuth(req, res, next) {
@@ -8,7 +14,7 @@ function webAuth(req, res, next) {
   return res.status(401).json({ error: 'unauthorized', message: '请先登录' });
 }
 
-export function authRouter(db) {
+export function authRouter(db, dbPath = DEFAULT_DB_PATH) {
   const r = express.Router();
 
   // 登录（网页）：POST { password } → 返回 session cookie + api token
@@ -38,6 +44,19 @@ export function authRouter(db) {
       web_password: getWebPassword(db),
       smtp: smtp ? JSON.parse(smtp.value) : null,
     });
+  });
+
+  // 主动发送备份邮件
+  r.post('/backup', apiAuth(db), async (req, res) => {
+    try {
+      const result = await sendBackup(db, dbPath);
+      if (result.skipped) {
+        return res.json({ ok: false, reason: result.reason, message: '未配置 SMTP 或数据库文件不存在' });
+      }
+      res.json({ ok: true, sentTo: result.sentTo });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
   });
 
   return r;

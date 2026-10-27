@@ -644,6 +644,7 @@ async function renderSettings(c) {
       <input class="field-input" id="set-smtp-pass" type="password" value="${smtp.pass || ''}" placeholder="SMTP 授权码">
       <div class="field-label" style="margin-top:8px">收件邮箱</div>
       <input class="field-input" id="set-smtp-to" value="${smtp.to || ''}" placeholder="收件邮箱">
+      <button class="btn-ghost" id="send-backup-btn" style="width:100%;margin-top:12px">📧 立即发送备份邮件</button>
     </div>
     <button class="btn-primary" id="save-settings-btn" style="width:100%">保存设置</button>
     <button class="btn-ghost" id="periodic-manage-btn" style="width:100%;margin-top:10px">管理周期账</button>
@@ -658,6 +659,25 @@ async function renderSettings(c) {
     };
     await api('/api/auth/settings', { method: 'POST', body: JSON.stringify({ web_password: $('#set-pwd').value, smtp }) });
     toast('设置已保存');
+  });
+  $('#send-backup-btn').addEventListener('click', async () => {
+    // 先保存当前 SMTP 配置，再发送
+    const smtp = {
+      host: $('#set-smtp-host').value.trim(),
+      port: parseInt($('#set-smtp-port').value) || 465,
+      user: $('#set-smtp-user').value.trim(),
+      pass: $('#set-smtp-pass').value,
+      to: $('#set-smtp-to').value.trim(),
+    };
+    await api('/api/auth/settings', { method: 'POST', body: JSON.stringify({ web_password: $('#set-pwd').value, smtp }) });
+    toast('正在发送备份邮件...');
+    try {
+      const r = await api('/api/auth/backup', { method: 'POST', body: JSON.stringify({}) });
+      if (r.ok) toast(`备份已发送至 ${r.sentTo}`);
+      else toast(r.message || '发送失败：请先填写完整的 SMTP 配置');
+    } catch (e) {
+      toast('发送失败：' + (e.message || '未知错误'));
+    }
   });
   $('#token-box').addEventListener('click', () => { navigator.clipboard.writeText(state.token); toast('Token 已复制'); });
   $('#periodic-manage-btn').addEventListener('click', () => renderPeriodic(c));

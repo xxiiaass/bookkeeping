@@ -21,7 +21,7 @@ export function createApp(db) {
   app.use(cookieParser());
 
   // 登录接口不需要鉴权
-  app.use('/api/auth', authRouter(db));
+  app.use('/api/auth', authRouter(db, path.join(__dirname, 'data', 'zhangben.db')));
 
   // 其余 API 统一鉴权
   app.use('/api/accounts', apiAuth(db), accountsRouter(db));
