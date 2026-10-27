@@ -138,18 +138,50 @@ function renderSummary(report) {
   if (state.tab === 'assets') {
     card.classList.remove('hidden');
     card.innerHTML = `
-      <div><div class="label">资产 <span class="arrow">▼</span></div><div class="amount">¥${fmt(report.totalAsset)}</div><div class="sub">净资产 ¥${fmt(report.netAsset)}</div></div>
+      <div><div class="label" id="assets-filter-trigger">资产 <span class="arrow">▼</span></div><div class="amount">¥${fmt(report.totalAsset)}</div><div class="sub">净资产 ¥${fmt(report.netAsset)}</div></div>
       <div class="summary-right"><span class="eye" id="eye-toggle">👁</span></div>
     `;
+    $('#assets-filter-trigger')?.addEventListener('click', () => showAccountFilter('asset'));
   } else if (state.tab === 'liabilities') {
     card.classList.remove('hidden');
     card.innerHTML = `
-      <div><div class="label">负债 <span class="arrow">▼</span></div><div class="amount">¥${fmt(report.totalLiability)}</div></div>
+      <div><div class="label" id="liab-filter-trigger">负债 <span class="arrow">▼</span></div><div class="amount">¥${fmt(report.totalLiability)}</div></div>
       <div class="summary-right"><span class="eye" id="eye-toggle">👁</span></div>
     `;
+    $('#liab-filter-trigger')?.addEventListener('click', () => showAccountFilter('liability'));
   } else {
     card.classList.add('hidden');
   }
+}
+
+// 照抄口袋记账：点击「资产/负债」倒三角，弹出「选择要展示的账户」多选列表
+function showAccountFilter(type) {
+  const accounts = state.accounts.filter(a => a.type === type);
+  const body = $('#form-modal-body');
+  $('#form-modal-title').textContent = type === 'asset' ? '选择要展示的账户' : '选择要展示的负债账户';
+  body.innerHTML = accounts.map(a => `
+    <label class="filter-row" style="display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid #f5f5f5;cursor:pointer">
+      <input type="checkbox" data-filter-id="${a.id}" ${a.shown ? 'checked' : ''} style="width:20px;height:20px">
+      <span style="font-size:15px">${a.name}</span>
+    </label>
+  `).join('');
+  body.innerHTML += `<div class="form-actions"><button class="btn-primary" id="filter-ok">确定</button></div>`;
+
+  $('#form-modal').classList.remove('hidden');
+  const close = () => $('#form-modal').classList.add('hidden');
+  $('#form-modal-close').addEventListener('click', close);
+  $('#filter-ok').addEventListener('click', async () => {
+    const checks = $$('input[data-filter-id]');
+    for (const chk of checks) {
+      const id = Number(chk.dataset.filterId);
+      const shown = chk.checked ? 1 : 0;
+      const a = state.accounts.find(x => x.id === id);
+      if (a && a.shown !== shown) {
+        await api(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ shown }) });
+      }
+    }
+    close(); refresh();
+  });
 }
 
 async function renderTab() {
@@ -163,8 +195,8 @@ async function renderTab() {
 
 // ---------- 资产页（含应收，照抄口袋记账） ----------
 function renderAssets(c) {
-  const assets = state.accounts.filter(a => a.type === 'asset');
-  const receivables = state.accounts.filter(a => a.type === 'receivable');
+  const assets = state.accounts.filter(a => a.type === 'asset' && a.shown);
+  const receivables = state.accounts.filter(a => a.type === 'receivable' && a.shown);
 
   let html = assets.map((a, i) => `
     <div class="account-card" style="background:${a.color || PALETTE[i % PALETTE.length]}" data-id="${a.id}">
@@ -205,8 +237,8 @@ function renderAssets(c) {
 
 // ---------- 负债页（含应付/借款，照抄口袋记账） ----------
 function renderLiabilities(c) {
-  const liabs = state.accounts.filter(a => a.type === 'liability');
-  const payables = state.accounts.filter(a => a.type === 'payable');
+  const liabs = state.accounts.filter(a => a.type === 'liability' && a.shown);
+  const payables = state.accounts.filter(a => a.type === 'payable' && a.shown);
 
   let html = liabs.map((a, i) => `
     <div class="account-card" style="background:${a.color || PALETTE[(i + 1) % PALETTE.length]}" data-id="${a.id}">
@@ -699,8 +731,10 @@ function editAccount(id) {
 
 function editEntry(id, e) {
   if (!e) return;
+  const isIncome = e.type === 'income';
+  const catOptions = (isIncome ? state.categories.income : state.categories.expense).map(c => [c.name, c.name]);
   formDialog('修改账单', [
-    { key: 'category', label: '分类', type: 'text', value: e.category },
+    { key: 'category', label: '分类', type: 'select', value: e.category, options: catOptions },
     { key: 'amount', label: '金额（元）', type: 'text', value: fmt(e.amount) },
     { key: 'note', label: '备注', type: 'text', value: e.note },
   ], async (r) => {
@@ -722,10 +756,12 @@ function addItemDialog(type, accountId) {
 }
 
 function addPeriodicDialog() {
+  const expenseCats = state.categories.expense.map(c => [c.name, c.name]);
+  const incomeCats = state.categories.income.map(c => [c.name, c.name]);
   formDialog('添加周期账', [
     { key: 'name', label: '名称（如"房贷"）', type: 'text' },
     { key: 'type', label: '类型', type: 'select', value: 'expense', options: [['expense', '支出'], ['income', '收入']] },
-    { key: 'category', label: '分类', type: 'text' },
+    { key: 'category', label: '分类', type: 'select', value: '房贷', options: expenseCats },
     { key: 'amount', label: '金额（元）', type: 'text' },
     { key: 'cron', label: '周期', type: 'select', value: 'MONTHLY:1', options: [
       ['MONTHLY:1', '每月1号'], ['MONTHLY:5', '每月5号'], ['MONTHLY:10', '每月10号'],
@@ -734,6 +770,12 @@ function addPeriodicDialog() {
   ], async (r) => {
     await api('/api/periodic', { method: 'POST', body: JSON.stringify({ name: r.name, type: r.type, category: r.category, amount: toFen(r.amount) ?? 0, cron: r.cron }) });
     toast('已添加'); renderPeriodic($('#content'));
+  });
+
+  // 类型切换时，动态更新分类下拉
+  $('#fd-type')?.addEventListener('change', (e) => {
+    const cats = e.target.value === 'income' ? incomeCats : expenseCats;
+    $('#fd-category').innerHTML = cats.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
   });
 }
 
