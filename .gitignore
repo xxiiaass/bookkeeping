@@ -5,3 +5,4 @@ data/*.db-shm
 .superpowers/
 *.log
 .DS_Store
+.workbuddy/
