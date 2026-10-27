@@ -57,17 +57,26 @@ function confirmDialog(text) {
 }
 
 // fields: [{key,label,type,value,options,placeholder}]
+// type === 'select' 时：点击后弹出全屏大号选项面板（网格），options 为 [[value,label]] 或 [label]
 function formDialog(title, fields, onSubmit) {
   $('#form-modal-title').textContent = title;
   const body = $('#form-modal-body');
   body.innerHTML = fields.map(f => {
     const id = `fd-${f.key}`;
     if (f.type === 'select') {
-      const opts = (f.options || []).map(o => {
-        const [val, label] = Array.isArray(o) ? o : [o, o];
-        return `<option value="${val}" ${String(val) === String(f.value) ? 'selected' : ''}>${label}</option>`;
-      }).join('');
-      return `<div><div class="field-label">${f.label}</div><select class="field-select" id="${id}">${opts}</select></div>`;
+      const opts = (f.options || []).map(o => Array.isArray(o) ? { value: o[0], label: o[1] } : { value: o, label: o });
+      const cur = opts.find(o => String(o.value) === String(f.value)) || opts[0];
+      const curLabel = cur ? cur.label : '';
+      return `
+        <div>
+          <div class="field-label">${f.label}</div>
+          <div class="custom-select-trigger" id="${id}">
+            <span class="custom-select-value">${curLabel}</span>
+            <span class="custom-select-arrow">▾</span>
+          </div>
+          <input type="hidden" id="${id}-hidden" value="${cur ? cur.value : ''}">
+        </div>
+      `;
     }
     return `<div><div class="field-label">${f.label}</div><input class="field-input" type="${f.type || 'text'}" id="${id}" value="${f.value ?? ''}" placeholder="${f.placeholder || ''}"></div>`;
   }).join('');
@@ -77,10 +86,51 @@ function formDialog(title, fields, onSubmit) {
   const close = () => $('#form-modal').classList.add('hidden');
   $('#form-cancel').addEventListener('click', close);
   $('#form-modal-close').addEventListener('click', close);
+
+  // 自定义下拉：点击弹出全屏选项面板
+  $$('.custom-select-trigger').forEach(trigger => {
+    trigger.addEventListener('click', () => {
+      const f = fields.find(x => `fd-${x.key}` === trigger.id);
+      openOptionPanel(f, trigger);
+    });
+  });
+
   $('#form-ok').addEventListener('click', () => {
     const result = {};
-    for (const f of fields) result[f.key] = $(`#fd-${f.key}`).value;
+    for (const f of fields) {
+      const el = $(`#fd-${f.key}`);
+      result[f.key] = f.type === 'select' ? $(`#fd-${f.key}-hidden`).value : el.value;
+    }
     close(); onSubmit(result);
+  });
+}
+
+// 全屏选项面板（网格大按钮）
+function openOptionPanel(field, trigger) {
+  // 支持动态 options（如周期账分类随类型联动），通过 trigger.dataset.options 传入
+  let opts;
+  if (trigger.dataset.options) {
+    opts = JSON.parse(trigger.dataset.options).map(([v, l]) => ({ value: v, label: l }));
+  } else {
+    opts = (field.options || []).map(o => Array.isArray(o) ? { value: o[0], label: o[1] } : { value: o, label: o });
+  }
+  const curVal = $(`#${trigger.id}-hidden`).value;
+  const panel = $('#option-panel');
+  panel.querySelector('.op-panel-title').textContent = '选择' + field.label;
+  panel.querySelector('.op-panel-grid').innerHTML = opts.map(o => `
+    <button class="op-option ${String(o.value) === String(curVal) ? 'selected' : ''}" data-value="${o.value}">${o.label}</button>
+  `).join('');
+  panel.classList.remove('hidden');
+
+  panel.querySelectorAll('.op-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // 更新 trigger 显示和 hidden 值
+      trigger.querySelector('.custom-select-value').textContent = btn.textContent;
+      $(`#${trigger.id}-hidden`).value = btn.dataset.value;
+      panel.classList.add('hidden');
+      // 触发联动（如周期账类型切换分类）
+      $(`#${trigger.id}-hidden`).dispatchEvent(new Event('change', { bubbles: true }));
+    });
   });
 }
 
@@ -772,10 +822,14 @@ function addPeriodicDialog() {
     toast('已添加'); renderPeriodic($('#content'));
   });
 
-  // 类型切换时，动态更新分类下拉
-  $('#fd-type')?.addEventListener('change', (e) => {
-    const cats = e.target.value === 'income' ? incomeCats : expenseCats;
-    $('#fd-category').innerHTML = cats.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  // 类型切换时，动态更新分类下拉的选项
+  $('#fd-type-hidden')?.addEventListener('change', (e) => {
+    const isIncome = e.target.value === 'income';
+    const cats = isIncome ? incomeCats : expenseCats;
+    // 更新分类字段：重置为对应类型第一个分类，并记录动态选项
+    $('#fd-category .custom-select-value').textContent = cats[0][1];
+    $('#fd-category-hidden').value = cats[0][0];
+    $('#fd-category').dataset.options = JSON.stringify(cats);
   });
 }
 
@@ -820,6 +874,9 @@ function bindEvents() {
       renderEntryModal();
     });
   });
+
+  // 选项面板关闭
+  $('#op-panel-close').addEventListener('click', () => $('#option-panel').classList.add('hidden'));
 }
 
 function setNavActive(nav) {
