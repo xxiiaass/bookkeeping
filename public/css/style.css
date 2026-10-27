@@ -251,6 +251,25 @@ body {
 .month-summary .ms-label { font-size: 12px; color: var(--text-light); }
 .month-summary .ms-amount { font-size: 16px; font-weight: 700; margin-top: 2px; }
 
+/* 月份切换导航 */
+.month-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--white); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px;
+}
+.month-nav .month-label { font-size: 16px; font-weight: 600; }
+.month-nav button {
+  background: none; border: 1px solid #ddd; border-radius: 8px;
+  padding: 6px 14px; font-size: 16px; cursor: pointer; color: #666;
+}
+
+/* 报表 收入/支出 切换 tab */
+.report-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.rtab {
+  flex: 1; padding: 10px; border: none; border-radius: 20px;
+  background: #f0f0f0; color: #666; font-size: 15px; cursor: pointer;
+}
+.rtab.active { background: var(--blue); color: #fff; font-weight: 600; }
+
 /* 报表：环形图 + 分类列表 */
 .report-chart-wrap { display: flex; flex-direction: column; align-items: center; padding: 20px 0; }
 .report-donut { position: relative; width: 180px; height: 180px; }

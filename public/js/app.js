@@ -5,6 +5,8 @@ const state = {
   accounts: [],
   categories: { expense: [], income: [] },
   month: new Date().toISOString().slice(0, 7),  // 账单/报表当前月份 YYYY-MM
+  reportType: 'expense',  // 报表页 收入/支出 切换
+  detailStatus: 'open',    // 应收/应付详情页 未完成/已完成 切换
   // 录入
   entryType: 'expense',
   entryCategory: '',
@@ -205,8 +207,10 @@ function renderSummary(report) {
 }
 
 // 照抄口袋记账：点击「资产/负债」倒三角，弹出「选择要展示的账户」多选列表
+// asset 页可选 asset + receivable；liability 页可选 liability + payable
 function showAccountFilter(type) {
-  const accounts = state.accounts.filter(a => a.type === type);
+  const typeSet = type === 'asset' ? ['asset', 'receivable'] : ['liability', 'payable'];
+  const accounts = state.accounts.filter(a => typeSet.includes(a.type));
   const body = $('#form-modal-body');
   $('#form-modal-title').textContent = type === 'asset' ? '选择要展示的账户' : '选择要展示的负债账户';
   body.innerHTML = accounts.map(a => `
@@ -334,8 +338,9 @@ function renderLiabilities(c) {
 // ---------- 应收明细页（橙色头，照抄） ----------
 async function renderReceivableDetail(c, accountId) {
   const res = await api('/api/receivables?type=receivable');
-  const items = res.items.filter(it => it.account_id === accountId);
-  const acc = state.accounts.find(a => a.id === accountId);
+  const allItems = res.items.filter(it => it.account_id === accountId);
+  const status = state.detailStatus || 'open'; // open 未完成 / done 已完成
+  const items = allItems.filter(it => (status === 'done' ? it.status === 'done' : it.status !== 'done'));
   const total = items.reduce((s, it) => s + it.amount, 0);
 
   const groups = {};
@@ -344,12 +349,12 @@ async function renderReceivableDetail(c, accountId) {
   let html = `
     <div class="detail-header" style="background:#ff8a3d;color:#fff;border-radius:0 0 16px 16px;padding:16px;margin:-8px -12px 12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:14px">‹ 返回</span>
-        <span style="font-size:14px">未完成 ▼</span>
-        <span style="font-size:14px" id="rcv-back">设置</span>
+        <span style="font-size:16px;cursor:pointer" id="rcv-back">‹ 返回</span>
+        <span style="font-size:14px;cursor:pointer" id="rcv-status">${status === 'done' ? '已完成' : '未完成'} ▼</span>
+        <span style="font-size:14px;width:40px"></span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:14px">应收总额</span>
+        <span style="font-size:14px">应收总额（${status === 'done' ? '已完成' : '未完成'}）</span>
         <span style="font-size:28px;font-weight:700">¥${fmt(total)}</span>
       </div>
     </div>
@@ -369,15 +374,25 @@ async function renderReceivableDetail(c, accountId) {
       `;
     }
   }
+  if (items.length === 0) html += `<div style="text-align:center;color:#999;padding:30px 0">暂无${status === 'done' ? '已完成' : '未完成'}记录</div>`;
   html += `<button class="add-record-btn" id="add-item-btn">＋ 添加记录</button>`;
   c.innerHTML = html;
 
-  $('#rcv-back').addEventListener('click', () => renderTab());
+  $('#rcv-back').addEventListener('click', () => { state.tab = 'assets'; refresh(); });
+  $('#rcv-status').addEventListener('click', () => {
+    state.detailStatus = status === 'done' ? 'open' : 'done';
+    renderReceivableDetail(c, accountId);
+  });
   $$('.list-item[data-item]').forEach(el => {
     el.addEventListener('click', async () => {
       const it = items.find(x => x.id == el.dataset.item);
-      const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
-      if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderReceivableDetail(c, accountId); }
+      if (it.status === 'done') {
+        const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
+        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderReceivableDetail(c, accountId); }
+      } else {
+        const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
+        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderReceivableDetail(c, accountId); }
+      }
     });
   });
   $('#add-item-btn').addEventListener('click', () => addItemDialog('receivable', accountId));
@@ -386,7 +401,9 @@ async function renderReceivableDetail(c, accountId) {
 // ---------- 应付明细页（粉色头，照抄） ----------
 async function renderPayableDetail(c, accountId) {
   const res = await api('/api/receivables?type=payable');
-  const items = res.items.filter(it => it.account_id === accountId);
+  const allItems = res.items.filter(it => it.account_id === accountId);
+  const status = state.detailStatus || 'open';
+  const items = allItems.filter(it => (status === 'done' ? it.status === 'done' : it.status !== 'done'));
   const total = items.reduce((s, it) => s + it.amount, 0);
 
   const groups = {};
@@ -395,12 +412,12 @@ async function renderPayableDetail(c, accountId) {
   let html = `
     <div class="detail-header" style="background:#ef6fa7;color:#fff;border-radius:0 0 16px 16px;padding:16px;margin:-8px -12px 12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:14px">‹ 返回</span>
-        <span style="font-size:14px">未完成 ▼</span>
-        <span style="font-size:14px" id="pay-back">设置</span>
+        <span style="font-size:16px;cursor:pointer" id="pay-back">‹ 返回</span>
+        <span style="font-size:14px;cursor:pointer" id="pay-status">${status === 'done' ? '已完成' : '未完成'} ▼</span>
+        <span style="font-size:14px;width:40px"></span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:14px">应付总额</span>
+        <span style="font-size:14px">应付总额（${status === 'done' ? '已完成' : '未完成'}）</span>
         <span style="font-size:28px;font-weight:700">¥${fmt(total)}</span>
       </div>
     </div>
@@ -420,15 +437,25 @@ async function renderPayableDetail(c, accountId) {
       `;
     }
   }
+  if (items.length === 0) html += `<div style="text-align:center;color:#999;padding:30px 0">暂无${status === 'done' ? '已完成' : '未完成'}记录</div>`;
   html += `<button class="add-record-btn" id="add-item-btn">＋ 添加记录</button>`;
   c.innerHTML = html;
 
-  $('#pay-back').addEventListener('click', () => renderTab());
+  $('#pay-back').addEventListener('click', () => { state.tab = 'liabilities'; refresh(); });
+  $('#pay-status').addEventListener('click', () => {
+    state.detailStatus = status === 'done' ? 'open' : 'done';
+    renderPayableDetail(c, accountId);
+  });
   $$('.list-item[data-item]').forEach(el => {
     el.addEventListener('click', async () => {
       const it = items.find(x => x.id == el.dataset.item);
-      const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
-      if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderPayableDetail(c, accountId); }
+      if (it.status === 'done') {
+        const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
+        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderPayableDetail(c, accountId); }
+      } else {
+        const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
+        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderPayableDetail(c, accountId); }
+      }
     });
   });
   $('#add-item-btn').addEventListener('click', () => addItemDialog('payable', accountId));
@@ -448,6 +475,11 @@ async function renderEntries(c) {
 
   const [y, m] = state.month.split('-');
   let html = `
+    <div class="month-nav">
+      <button id="mn-prev">‹</button>
+      <span class="month-label">${m}月</span>
+      <button id="mn-next">›</button>
+    </div>
     <div class="month-summary">
       <div class="ms-item"><div class="ms-label">${m}月收入</div><div class="ms-amount" style="color:#333">¥${fmt(income)}</div></div>
       <div class="ms-item"><div class="ms-label">${m}月支出</div><div class="ms-amount" style="color:#ef5350">¥${fmt(expense)}</div></div>
@@ -487,6 +519,8 @@ async function renderEntries(c) {
   $$('.list-item[data-id]').forEach(el => {
     el.addEventListener('click', () => editEntry(Number(el.dataset.id), entries.find(x => x.id == el.dataset.id)));
   });
+  $('#mn-prev')?.addEventListener('click', () => { shiftMonth(-1); renderTab(); });
+  $('#mn-next')?.addEventListener('click', () => { shiftMonth(1); renderTab(); });
   $('#balance-btn')?.addEventListener('click', async () => {
     formDialog('记平账', [
       { key: 'date', label: '日期', type: 'date', value: today() },
@@ -498,21 +532,18 @@ async function renderEntries(c) {
   });
 }
 
-// ---------- 报表页（环形图 + 分类统计，照抄） ----------
+// ---------- 报表页（环形图 + 分类统计，含收入/支出切换） ----------
 async function renderReport(c) {
-  const res = await api(`/api/entries?month=${state.month}&limit=500`);
-  const entries = res.entries.filter(e => e.type === 'expense' || e.type === 'balance');
-
-  // 按分类聚合支出
-  const byCat = {};
-  for (const e of entries) byCat[e.category || '其他'] = (byCat[e.category || '其他'] || 0) + e.amount;
-  const total = Object.values(byCat).reduce((s, v) => s + v, 0);
-
-  const list = Object.entries(byCat).map(([name, amount]) => ({ name, amount, pct: total ? amount / total : 0 }));
+  const res = await api(`/api/report?month=${state.month}`);
+  const byCat = res.byCategory || { income: [], expense: [] };
+  const rt = state.reportType || 'expense';
+  const list = (byCat[rt] || []).map(it => ({ name: it.category, amount: it.amount }));
+  const total = list.reduce((s, it) => s + it.amount, 0);
   list.sort((a, b) => b.amount - a.amount);
+  list.forEach(it => it.pct = total ? it.amount / total : 0);
 
   // 环形图用 SVG
-  const chartColors = ['#3b82f6', '#f5a623', '#ab47bc', '#ff8a3d', '#f9a825', '#a1887f', '#26c6da', '#8e9eef', '#66bb6a'];
+  const chartColors = ['#3b82f6', '#f5a623', '#ab47bc', '#ff8a3d', '#f9a825', '#a1887f', '#26c6da', '#8e9eef', '#66bb6a', '#ef5350', '#42a5f5'];
   let segs = '';
   let acc = 0;
   const R = 70, CX = 90, CY = 90;
@@ -528,11 +559,16 @@ async function renderReport(c) {
   });
 
   const [y, m] = state.month.split('-');
+  const rtLabel = rt === 'income' ? '总收入' : '总支出';
   let html = `
     <div class="report-month-nav">
       <button id="rm-prev">‹</button>
       <span class="rm-label">${m}月01日~${lastDay(y, m)}日</span>
       <button id="rm-next">›</button>
+    </div>
+    <div class="report-tabs">
+      <button class="rtab ${rt === 'expense' ? 'active' : ''}" data-rt="expense">支出</button>
+      <button class="rtab ${rt === 'income' ? 'active' : ''}" data-rt="income">收入</button>
     </div>
     <div class="report-chart-wrap">
       <div class="report-donut">
@@ -541,7 +577,7 @@ async function renderReport(c) {
           <circle cx="90" cy="90" r="40" fill="#f7f3ec"></circle>
         </svg>
         <div class="report-center">
-          <div class="rc-label">总支出</div>
+          <div class="rc-label">${rtLabel}</div>
           <div class="rc-amount">¥${fmt(total)}</div>
         </div>
       </div>
@@ -549,7 +585,7 @@ async function renderReport(c) {
   `;
 
   for (const it of list) {
-    const ci = catInfo('expense', it.name);
+    const ci = catInfo(rt, it.name);
     html += `
       <div class="cat-stat">
         <div class="li-icon" style="background:${ci.color}">${ci.icon}</div>
@@ -563,11 +599,15 @@ async function renderReport(c) {
       </div>
     `;
   }
-  if (list.length === 0) html += `<div style="text-align:center;color:#999;padding:40px 0">本月暂无支出</div>`;
+  if (list.length === 0) html += `<div style="text-align:center;color:#999;padding:40px 0">本月暂无${rt === 'income' ? '收入' : '支出'}</div>`;
   c.innerHTML = html;
 
   $('#rm-prev').addEventListener('click', () => { shiftMonth(-1); renderTab(); });
   $('#rm-next').addEventListener('click', () => { shiftMonth(1); renderTab(); });
+  $$('.rtab').forEach(el => el.addEventListener('click', () => {
+    state.reportType = el.dataset.rt;
+    renderTab();
+  }));
 }
 
 function shiftMonth(delta) {

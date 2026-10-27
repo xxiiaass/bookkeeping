@@ -1,5 +1,17 @@
 import express from 'express';
 
+// 同步应收/应付账户的余额 = 未结清明细之和
+export function syncReceivablePayableBalances(db) {
+  // 先清零所有应收/应付账户
+  db.prepare("UPDATE accounts SET balance = 0 WHERE type IN ('receivable','payable')").run();
+  const rows = db.prepare(
+    "SELECT account_id, SUM(amount) s FROM receivable_payable_items WHERE status = 'open' GROUP BY account_id"
+  ).all();
+  for (const r of rows) {
+    db.prepare('UPDATE accounts SET balance = ? WHERE id = ?').run(r.s, r.account_id);
+  }
+}
+
 export function receivablesRouter(db) {
   const r = express.Router();
 
@@ -23,6 +35,7 @@ export function receivablesRouter(db) {
     const info = db.prepare(
       'INSERT INTO receivable_payable_items (account_id, name, amount, date, status, note) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(account_id, name, amount, date, status, note);
+    syncReceivablePayableBalances(db);
     res.json({ item: db.prepare('SELECT * FROM receivable_payable_items WHERE id=?').get(info.lastInsertRowid) });
   });
 
@@ -33,6 +46,7 @@ export function receivablesRouter(db) {
     db.prepare(
       'UPDATE receivable_payable_items SET name=?, amount=?, date=?, status=?, note=? WHERE id=?'
     ).run(next.name, next.amount, next.date, next.status, next.note, cur.id);
+    syncReceivablePayableBalances(db);
     res.json({ item: db.prepare('SELECT * FROM receivable_payable_items WHERE id=?').get(cur.id) });
   });
 
@@ -40,6 +54,7 @@ export function receivablesRouter(db) {
     const cur = db.prepare('SELECT * FROM receivable_payable_items WHERE id=?').get(Number(req.params.id));
     if (!cur) return res.status(404).json({ error: 'not_found' });
     db.prepare('DELETE FROM receivable_payable_items WHERE id=?').run(cur.id);
+    syncReceivablePayableBalances(db);
     res.json({ ok: true });
   });
 
