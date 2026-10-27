@@ -152,19 +152,27 @@ async function doLogin() {
 }
 
 // ---------- 分类 ----------
-function loadCategories() {
-  state.categories.expense = [
-    ['餐饮','🍜','#f5a623'],['衣服鞋包','👕','#a06cd5'],['生活用品','🧴','#8e9eef'],['话费','📱','#5b8def'],
-    ['医疗','💊','#a1887f'],['交通','🚌','#43a047'],['房贷','🏠','#1565c0'],['养车','🚗','#1e88e5'],
-    ['房水电煤','🏠','#1e88e5'],['贷款利息','💳','#f9a825'],['娱乐','🎮','#9575cd'],['旅游','🏝','#26a69a'],
-    ['宠物','🐱','#26a69a'],['冤枉钱','😅','#bcaaa4'],['人际','🤝','#ff7043'],['装修','🔨','#3949ab'],
-    ['生活费','💰','#8e24aa'],['保险','🛡','#5c6bc0'],['平账','⚖️','#ef5350'],
-  ].map(([name,icon,color]) => ({name,icon,color}));
-  state.categories.income = [
-    ['工资','💰','#42a5f5'],['生活费','💵','#f9a825'],['红包','🧧','#ec407a'],['零花钱','🐷','#66bb6a'],
-    ['外快兼职','🧩','#26c6da'],['投资收入','📈','#a1887f'],['奖金','🏅','#ff7043'],['报销','🧾','#4dd0e1'],
-    ['退款','💸','#81c784'],['其他','⭐','#5c6bc0'],['平账','⚖️','#ef5350'],
-  ].map(([name,icon,color]) => ({name,icon,color}));
+async function loadCategories() {
+  // 从服务器数据库读取分类
+  try {
+    const res = await api('/api/categories');
+    state.categories.expense = res.expense || [];
+    state.categories.income = res.income || [];
+  } catch (e) {
+    // 降级：用内置兜底分类
+    state.categories.expense = [
+      ['餐饮','🍜','#f5a623'],['衣服鞋包','👕','#a06cd5'],['生活用品','🧴','#8e9eef'],['话费','📱','#5b8def'],
+      ['医疗','💊','#a1887f'],['交通','🚌','#43a047'],['房贷','🏠','#1565c0'],['养车','🚗','#1e88e5'],
+      ['房水电煤','🏠','#1e88e5'],['贷款利息','💳','#f9a825'],['娱乐','🎮','#9575cd'],['旅游','🏝','#26a69a'],
+      ['宠物','🐱','#26a69a'],['冤枉钱','😅','#bcaaa4'],['人际','🤝','#ff7043'],['装修','🔨','#3949ab'],
+      ['生活费','💰','#8e24aa'],['保险','🛡','#5c6bc0'],['平账','⚖️','#ef5350'],
+    ].map(([name,icon,color]) => ({name,icon,color}));
+    state.categories.income = [
+      ['工资','💰','#42a5f5'],['生活费','💵','#f9a825'],['红包','🧧','#ec407a'],['零花钱','🐷','#66bb6a'],
+      ['外快兼职','🧩','#26c6da'],['投资收入','📈','#a1887f'],['奖金','🏅','#ff7043'],['报销','🧾','#4dd0e1'],
+      ['退款','💸','#81c784'],['其他','⭐','#5c6bc0'],['平账','⚖️','#ef5350'],
+    ].map(([name,icon,color]) => ({name,icon,color}));
+  }
 }
 
 function catInfo(type, name) {
@@ -175,7 +183,7 @@ function catInfo(type, name) {
 // ---------- 数据 ----------
 async function refresh() {
   try {
-    loadCategories();
+    await loadCategories();
     const [accRes, reportRes] = await Promise.all([api('/api/accounts'), api('/api/report')]);
     state.accounts = accRes.accounts;
     renderSummary(reportRes);

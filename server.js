@@ -10,6 +10,7 @@ import { entriesRouter } from './src/routes/entries.js';
 import { periodicRouter } from './src/routes/periodic.js';
 import { receivablesRouter } from './src/routes/receivables.js';
 import { reportRouter } from './src/routes/report.js';
+import { categoriesRouter } from './src/routes/categories.js';
 import { scheduleBackup } from './src/backup.js';
 import { runDue } from './src/domain/periodic.js';
 
@@ -29,6 +30,7 @@ export function createApp(db) {
   app.use('/api/periodic', apiAuth(db), periodicRouter(db));
   app.use('/api/receivables', apiAuth(db), receivablesRouter(db));
   app.use('/api/report', apiAuth(db), reportRouter(db));
+  app.use('/api/categories', apiAuth(db), categoriesRouter(db));
 
   // 静态页面
   app.use(express.static(path.join(__dirname, 'public')));
