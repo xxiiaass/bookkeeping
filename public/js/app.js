@@ -769,14 +769,19 @@ function renderEntryModal() {
 
 function transferForm() {
   const accs = state.accounts.filter(a => a.type === 'asset' || a.type === 'liability');
+  // 转出默认选现金，转入默认选第一个非现金账户，避免默认「现金→现金」
+  const cash = state.accounts.find(a => a.name === '现金' && a.type === 'asset');
+  const fromDefault = cash ? cash.id : (accs[0] ? accs[0].id : '');
+  const toCandidates = accs.filter(a => a.id !== fromDefault);
+  const toDefault = toCandidates.length > 0 ? toCandidates[0].id : '';
   return `
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <span style="font-size:13px;color:#999;width:40px">转出</span>
-      <select id="tr-from" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}</select>
+      <select id="tr-from" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}" ${a.id === fromDefault ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <span style="font-size:13px;color:#999;width:40px">转入</span>
-      <select id="tr-to" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}</select>
+      <select id="tr-to" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}" ${a.id === toDefault ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <span style="font-size:13px;color:#999;width:40px">日期</span>
@@ -807,7 +812,10 @@ async function submitEntry() {
   const date = $('#entry-date')?.value || state.entryDate;
   const note = $('#entry-note')?.value || '';
   if (state.entryType === 'transfer') {
-    await api('/api/entries', { method: 'POST', body: JSON.stringify({ date, type: 'transfer', account_id: Number($('#tr-from').value), target_account_id: Number($('#tr-to').value), amount, note }) });
+    const fromId = Number($('#tr-from').value);
+    const toId = Number($('#tr-to').value);
+    if (fromId === toId) { toast('转出和转入账户不能相同'); return; }
+    await api('/api/entries', { method: 'POST', body: JSON.stringify({ date, type: 'transfer', account_id: fromId, target_account_id: toId, amount, note }) });
   } else {
     await api('/api/entries', { method: 'POST', body: JSON.stringify({ date, type: state.entryType, category: state.entryCategory || '其他', amount, note }) });
   }
