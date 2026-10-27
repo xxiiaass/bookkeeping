@@ -61,3 +61,16 @@ test('report：总资产含应收，总负债含应付', async () => {
   // 净资产 = 60000 - 20000 = 40000 元 = 4000000 分
   assert.strictEqual(rep.netAsset, 4000000);
 });
+
+test('report：未勾选(shown=0)的账户不计入汇总', async () => {
+  const { report } = await import('../src/domain/report.js');
+  const db = memDb();
+  // 现金 shown=1 余额 10000
+  db.prepare("INSERT INTO accounts (name, type, balance, shown) VALUES ('现金','asset',1000000,1)").run();
+  // 隐藏的账户 shown=0 余额 50000
+  db.prepare("INSERT INTO accounts (name, type, balance, shown) VALUES ('招商银行','asset',5000000,0)").run();
+
+  const rep = report(db);
+  // 只统计 shown=1 的现金，总资产 = 10000 元
+  assert.strictEqual(rep.totalAsset, 1000000);
+});

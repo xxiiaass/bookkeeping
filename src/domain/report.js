@@ -10,6 +10,7 @@ export function report(db, { month } = {}) {
   let payable = 0;
 
   for (const a of accounts) {
+    if (!a.shown) continue; // 未勾选展示的账户不计入汇总
     if (a.type === 'asset') totalAsset += a.balance;
     else if (a.type === 'liability') totalLiability += a.balance;
     else if (a.type === 'receivable') receivable += a.balance;
