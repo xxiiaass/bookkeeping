@@ -77,6 +77,35 @@ test('deleteEntry：删除后现金恢复', () => {
   assert.strictEqual(getCashAccount(db).balance, 0);
 });
 
+test('转账涉及负债账户：转出=用额度（欠款增），转入=还款（欠款减）', () => {
+  const db = memDb();
+  const cash = getCashAccount(db);
+  const cc = db.prepare("INSERT INTO accounts (name, type, balance, credit_limit) VALUES ('信用卡','liability',10000,5000000)").run();
+  const ccId = cc.lastInsertRowid;
+
+  // 负债账户作转出方：刷卡使用额度 → 欠款增加，可用额度减少
+  addEntry(db, { date: '2026-10-29', type: 'transfer', account_id: ccId, target_account_id: cash.id, amount: 200000 });
+  let row = db.prepare('SELECT balance FROM accounts WHERE id=?').get(ccId);
+  assert.strictEqual(row.balance, 210000, '用额度后欠款应增加到 2100');
+  assert.strictEqual(getCashAccount(db).balance, 200000, '现金应增加');
+
+  // 负债账户作转入方：还款 → 欠款减少，可用额度增加
+  addEntry(db, { date: '2026-10-29', type: 'transfer', account_id: cash.id, target_account_id: ccId, amount: 50000 });
+  row = db.prepare('SELECT balance FROM accounts WHERE id=?').get(ccId);
+  assert.strictEqual(row.balance, 160000, '还款后欠款应减少到 1600');
+  assert.strictEqual(getCashAccount(db).balance, 150000);
+});
+
+test('转账涉及应付账户：与负债同向', () => {
+  const db = memDb();
+  const cash = getCashAccount(db);
+  const p = db.prepare("INSERT INTO accounts (name, type, balance) VALUES ('银行贷款','payable',1000000)").run();
+  const pid = p.lastInsertRowid;
+  addEntry(db, { date: '2026-10-29', type: 'transfer', account_id: pid, target_account_id: cash.id, amount: 100000 });
+  const row = db.prepare('SELECT balance FROM accounts WHERE id=?').get(pid);
+  assert.strictEqual(row.balance, 1100000, '应付账户转出=欠款增加');
+});
+
 test('listEntries 按月过滤', () => {
   const db = memDb();
   addEntry(db, { date: '2026-10-01', type: 'expense', category: '餐饮', amount: 100 });

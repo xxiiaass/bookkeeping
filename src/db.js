@@ -130,6 +130,15 @@ export function initDb(dbPath = DEFAULT_DB_PATH) {
       key TEXT PRIMARY KEY,
       value TEXT DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS asset_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL UNIQUE,
+      shown_total INTEGER NOT NULL DEFAULT 0,
+      all_total INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_snapshots_date ON asset_snapshots(date);
   `);
 
   seedIfEmpty(db);

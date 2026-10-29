@@ -1,13 +1,15 @@
 // AI 记账前端 —— 照抄口袋记账的页面设计
 const state = {
   token: localStorage.getItem('zb_token') || '',
-  tab: 'assets',          // assets | liabilities | entries | report | settings
+  tab: 'assets',          // assets | liabilities | entries | report | settings | trend
   accounts: [],
   categories: { expense: [], income: [] },
   month: new Date().toISOString().slice(0, 7),  // 账单/报表当前月份 YYYY-MM
   reportType: 'expense',  // 报表页 收入/支出 切换
   detailStatus: 'open',    // 应收/应付详情页 未完成/已完成 切换
   hideAmount: false,       // 汇总金额是否隐藏（眼睛图标）
+  trendRange: 30,          // 趋势页：时间区间（天）
+  trendScope: 'shown',     // 趋势页：shown | all
   // 录入
   entryType: 'expense',
   entryCategory: '',
@@ -314,6 +316,7 @@ async function renderTab() {
   if (state.tab === 'liabilities') return renderLiabilities(c);
   if (state.tab === 'entries') return renderEntries(c);
   if (state.tab === 'report') return renderReport(c);
+  if (state.tab === 'trend') return renderTrend(c);
   if (state.tab === 'settings') return renderSettings(c);
 }
 
@@ -786,6 +789,120 @@ async function renderReport(c) {
   }));
 }
 
+// ---------- 资产趋势页（折线图） ----------
+async function renderTrend(c) {
+  const to = today();
+  const d = new Date();
+  d.setDate(d.getDate() - state.trendRange);
+  const from = d.toISOString().slice(0, 10);
+  const res = await api(`/api/snapshots?from=${from}&to=${to}`);
+  const snaps = res.snapshots || [];
+  const key = state.trendScope === 'all' ? 'allTotal' : 'shownTotal';
+
+  const ranges = [7, 30, 90, 180, 365];
+  let html = `
+    <div class="trend-header">
+      <div class="trend-title">资产趋势</div>
+      <div class="trend-scope-tabs">
+        <button class="tsc ${state.trendScope === 'shown' ? 'active' : ''}" data-scope="shown">显示账户</button>
+        <button class="tsc ${state.trendScope === 'all' ? 'active' : ''}" data-scope="all">所有账户</button>
+      </div>
+    </div>
+    <div class="trend-range-tabs">
+      ${ranges.map(r => `<button class="rtab2 ${state.trendRange === r ? 'active' : ''}" data-range="${r}">${r >= 365 ? '1年' : r + '天'}</button>`).join('')}
+    </div>
+  `;
+
+  if (snaps.length < 2) {
+    html += `<div class="empty-state"><div class="empty-emoji">📈</div><div class="empty-title">数据不足</div><div class="empty-desc">每天 0 点自动记录一次，请等待更多数据积累</div></div>`;
+    c.innerHTML = html;
+    bindTrendEvents();
+    return;
+  }
+
+  const values = snaps.map(s => s[key]);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const span = maxV - minV || 1;
+  const W = 340, H = 200, P = 30;
+  const stepX = snaps.length > 1 ? (W - 2 * P) / (snaps.length - 1) : 0;
+  const points = snaps.map((s, i) => {
+    const x = P + i * stepX;
+    const y = H - P - ((s[key] - minV) / span) * (H - 2 * P);
+    return [x, y, s];
+  });
+
+  // 折线 + 面积
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L ${points[points.length - 1][0].toFixed(1)} ${H - P} L ${points[0][0].toFixed(1)} ${H - P} Z`;
+
+  // 网格 + Y 轴标签
+  const gridLines = [];
+  for (let i = 0; i <= 4; i++) {
+    const y = P + (i * (H - 2 * P) / 4);
+    const v = maxV - (i * span / 4);
+    gridLines.push(`<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="#f0f0f0" stroke-width="1"></line>`);
+    gridLines.push(`<text x="${W - P + 4}" y="${y + 4}" font-size="10" fill="#999">¥${(v / 100 / 10000).toFixed(1)}万</text>`);
+  }
+
+  // X 轴标签（首尾）
+  const xLabels = `
+    <text x="${P}" y="${H - 8}" font-size="10" fill="#999">${snaps[0].date.slice(5)}</text>
+    <text x="${W - P}" y="${H - 8}" font-size="10" fill="#999" text-anchor="end">${snaps[snaps.length - 1].date.slice(5)}</text>
+  `;
+
+  // 数据点（少时显示）
+  const dots = snaps.length <= 40 ? points.map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="#2563eb"></circle>`).join('') : '';
+
+  const latest = snaps[snaps.length - 1];
+  const first = snaps[0];
+  const diff = latest[key] - first[key];
+  const diffPct = first[key] !== 0 ? (diff / Math.abs(first[key]) * 100).toFixed(2) : '0';
+  const diffColor = diff >= 0 ? '#059669' : '#dc2626';
+  const diffSign = diff >= 0 ? '+' : '';
+
+  html += `
+    <div class="trend-summary">
+      <div class="ts-current">¥${fmt(latest[key])}</div>
+      <div class="ts-diff" style="color:${diffColor}">${diffSign}¥${fmt(Math.abs(diff))} (${diffSign}${diffPct}%)</div>
+      <div class="ts-period">${first.date} ~ ${latest.date}</div>
+    </div>
+    <div class="trend-chart-wrap">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2563eb" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="#2563eb" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        ${gridLines.join('')}
+        <path d="${areaPath}" fill="url(#trendGrad)"></path>
+        <path d="${linePath}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+        ${dots}
+        ${xLabels}
+      </svg>
+    </div>
+    <div class="trend-detail">
+      <div class="td-row"><span>最高</span><span>¥${fmt(maxV)}</span></div>
+      <div class="td-row"><span>最低</span><span>¥${fmt(minV)}</span></div>
+      <div class="td-row"><span>记录天数</span><span>${snaps.length} 天</span></div>
+    </div>
+  `;
+  c.innerHTML = html;
+  bindTrendEvents();
+}
+
+function bindTrendEvents() {
+  $$('.tsc').forEach(el => el.addEventListener('click', () => {
+    state.trendScope = el.dataset.scope;
+    renderTab();
+  }));
+  $$('.rtab2').forEach(el => el.addEventListener('click', () => {
+    state.trendRange = Number(el.dataset.range);
+    renderTab();
+  }));
+}
+
 function shiftMonth(delta) {
   const [y, m] = state.month.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);
@@ -824,6 +941,7 @@ async function renderSettings(c) {
     </div>
     <button class="btn-primary" id="save-settings-btn" style="width:100%">保存设置</button>
     <button class="btn-ghost" id="periodic-manage-btn" style="width:100%;margin-top:10px">管理周期账</button>
+    <button class="btn-ghost" id="go-trend-btn" style="width:100%;margin-top:10px">📈 资产趋势</button>
   `;
   $('#save-settings-btn').addEventListener('click', async () => {
     const smtp = {
@@ -870,6 +988,7 @@ async function renderSettings(c) {
   });
   $('#token-box').addEventListener('click', () => { navigator.clipboard.writeText(state.token); toast('Token 已复制', 'success'); });
   $('#periodic-manage-btn').addEventListener('click', () => renderPeriodic(c));
+  $('#go-trend-btn').addEventListener('click', () => { state.tab = 'trend'; refresh(); });
 }
 
 // ---------- 周期账管理（独立视图） ----------
@@ -1148,6 +1267,7 @@ function bindEvents() {
 
   // 右上趋势图标 → 报表
   $('#go-report').addEventListener('click', () => { state.tab = 'report'; setNavActive('report'); refresh(); });
+  $('#go-trend').addEventListener('click', () => { state.tab = 'trend'; setNavActive(''); refresh(); });
 
   // 底部导航
   $$('.nav-btn').forEach(el => {

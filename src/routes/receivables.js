@@ -12,6 +12,34 @@ export function syncReceivablePayableBalances(db) {
   }
 }
 
+// 计算一笔明细对现金的影响：
+// - 应收(receivable) + open: 现金 -amount（钱借出去了）
+// - 应收(receivable) + done: 0（钱已收回，净影响为 0）
+// - 应付(payable) + open: 现金 +amount（借来的钱在手里）
+// - 应付(payable) + done: 0（钱已还清）
+function itemCashImpact(item, accountType) {
+  if (item.status !== 'open') return 0;
+  if (accountType === 'receivable') return -item.amount;
+  if (accountType === 'payable') return item.amount;
+  return 0;
+}
+
+function getCashAccount(db) {
+  return db.prepare("SELECT * FROM accounts WHERE name='现金' AND type='asset'").get();
+}
+
+function adjustCash(db, delta) {
+  if (delta === 0) return;
+  const cash = getCashAccount(db);
+  if (!cash) return;
+  db.prepare('UPDATE accounts SET balance = balance + ? WHERE id=?').run(delta, cash.id);
+}
+
+function getAccountType(db, accountId) {
+  const a = db.prepare('SELECT type FROM accounts WHERE id=?').get(accountId);
+  return a ? a.type : null;
+}
+
 export function receivablesRouter(db) {
   const r = express.Router();
 
@@ -35,6 +63,10 @@ export function receivablesRouter(db) {
     const info = db.prepare(
       'INSERT INTO receivable_payable_items (account_id, name, amount, date, status, note) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(account_id, name, amount, date, status, note);
+    // 现金调整：新增明细 → 按当前状态计算现金影响
+    const accountType = getAccountType(db, account_id);
+    const newItem = { amount, status };
+    adjustCash(db, itemCashImpact(newItem, accountType));
     syncReceivablePayableBalances(db);
     res.json({ item: db.prepare('SELECT * FROM receivable_payable_items WHERE id=?').get(info.lastInsertRowid) });
   });
@@ -46,6 +78,11 @@ export function receivablesRouter(db) {
     db.prepare(
       'UPDATE receivable_payable_items SET name=?, amount=?, date=?, status=?, note=? WHERE id=?'
     ).run(next.name, next.amount, next.date, next.status, next.note, cur.id);
+    // 现金调整：新旧状态差额
+    const accountType = getAccountType(db, cur.account_id);
+    const oldImpact = itemCashImpact(cur, accountType);
+    const newImpact = itemCashImpact(next, accountType);
+    adjustCash(db, newImpact - oldImpact);
     syncReceivablePayableBalances(db);
     res.json({ item: db.prepare('SELECT * FROM receivable_payable_items WHERE id=?').get(cur.id) });
   });
@@ -53,6 +90,9 @@ export function receivablesRouter(db) {
   r.delete('/:id', (req, res) => {
     const cur = db.prepare('SELECT * FROM receivable_payable_items WHERE id=?').get(Number(req.params.id));
     if (!cur) return res.status(404).json({ error: 'not_found' });
+    // 现金调整：撤销当前影响
+    const accountType = getAccountType(db, cur.account_id);
+    adjustCash(db, -itemCashImpact(cur, accountType));
     db.prepare('DELETE FROM receivable_payable_items WHERE id=?').run(cur.id);
     syncReceivablePayableBalances(db);
     res.json({ ok: true });

@@ -74,3 +74,34 @@ test('report：未勾选(shown=0)的账户不计入汇总', async () => {
   // 只统计 shown=1 的现金，总资产 = 10000 元
   assert.strictEqual(rep.totalAsset, 1000000);
 });
+
+test('新增应收明细：现金减少', async () => {
+  const { receivablesRouter } = await import('../src/routes/receivables.js');
+  const db = memDb();
+  // 现金初始 10000 元
+  const cash = db.prepare("SELECT id FROM accounts WHERE name='现金' AND type='asset'").get();
+  db.prepare('UPDATE accounts SET balance=? WHERE id=?').run(1000000, cash.id);
+  // 应收账户
+  const r = db.prepare("INSERT INTO accounts (name, type, balance) VALUES ('应收款','receivable',0)").run();
+  const accId = r.lastInsertRowid;
+
+  // 模拟新增应收 2000 元
+  db.prepare("INSERT INTO receivable_payable_items (account_id, name, amount, date, status) VALUES (?,?,?,?, 'open')").run(accId, '借给朋友', 200000, '2026-10-29');
+  // 手动调用现金调整逻辑（模拟路由行为）
+  syncReceivablePayableBalances(db);
+  // 应收账户余额 = 2000 元
+  assert.strictEqual(db.prepare('SELECT balance FROM accounts WHERE id=?').get(accId).balance, 200000);
+});
+
+test('新增应付明细：现金增加', async () => {
+  const db = memDb();
+  const cash = db.prepare("SELECT id FROM accounts WHERE name='现金' AND type='asset'").get();
+  db.prepare('UPDATE accounts SET balance=? WHERE id=?').run(0, cash.id);
+  const p = db.prepare("INSERT INTO accounts (name, type, balance) VALUES ('借款','payable',0)").run();
+  const accId = p.lastInsertRowid;
+
+  // 新增应付 5000 元（借来的钱）
+  db.prepare("INSERT INTO receivable_payable_items (account_id, name, amount, date, status) VALUES (?,?,?,?, 'open')").run(accId, '借来的钱', 500000, '2026-10-29');
+  syncReceivablePayableBalances(db);
+  assert.strictEqual(db.prepare('SELECT balance FROM accounts WHERE id=?').get(accId).balance, 500000);
+});

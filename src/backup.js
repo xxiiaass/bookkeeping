@@ -64,11 +64,5 @@ export async function sendBackup(db, dbPath) {
   return { ok: true, sentTo: cfg.to };
 }
 
-export function scheduleBackup(db, dbPath, { intervalMs = 24 * 3600 * 1000 } = {}) {
-  const timer = setInterval(() => {
-    sendBackup(db, dbPath).catch(err => console.error('[backup] 失败:', err.message));
-  }, intervalMs);
-  // 立即执行一次
-  sendBackup(db, dbPath).catch(err => console.error('[backup] 失败:', err.message));
-  return timer;
-}
+// 保留旧接口兼容（不再使用，server.js 已改为 dailyTimer 统一调度）
+export function scheduleBackup() { return null; }

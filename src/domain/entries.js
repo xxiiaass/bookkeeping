@@ -23,6 +23,17 @@ export function getEntry(db, id) {
   return db.prepare('SELECT * FROM entries WHERE id = ?').get(id);
 }
 
+// 账户净值变化（与 type 无关的通用口径）
+// 资产/应收：balance 增加 = 净值增加
+// 负债/应付：balance 增加 = 欠款增加 = 净值减少，故符号取反
+function applyAccountDelta(db, id, delta) {
+  if (!id) return;
+  const acc = db.prepare('SELECT type FROM accounts WHERE id=?').get(id);
+  if (!acc) return;
+  const sign = acc.type === 'liability' || acc.type === 'payable' ? -1 : 1;
+  db.prepare('UPDATE accounts SET balance = balance + ? WHERE id=?').run(delta * sign, id);
+}
+
 export function addEntry(db, { date, type, category = '', account_id = null, target_account_id = null, amount, note = '', is_balance = 0 }) {
   const cash = getCashAccount(db);
   // 默认从现金账户走
@@ -42,9 +53,9 @@ export function addEntry(db, { date, type, category = '', account_id = null, tar
     } else if (type === 'income') {
       db.prepare('UPDATE accounts SET balance = balance + ? WHERE id=?').run(amount, cash.id);
     } else if (type === 'transfer') {
-      // 转出方减少，转入方增加
-      if (fromId) db.prepare('UPDATE accounts SET balance = balance - ? WHERE id=?').run(amount, fromId);
-      if (target_account_id) db.prepare('UPDATE accounts SET balance = balance + ? WHERE id=?').run(amount, target_account_id);
+      // 转出方净值减少，转入方净值增加（负债账户内部自动反向：转出=用额度=欠款增加）
+      applyAccountDelta(db, fromId, -amount);
+      applyAccountDelta(db, target_account_id, amount);
     }
   }
   return getEntry(db, info.lastInsertRowid);
@@ -110,8 +121,8 @@ function revertCashEffect(db, entry, cash) {
   } else if (entry.type === 'income') {
     db.prepare('UPDATE accounts SET balance = balance - ? WHERE id=?').run(entry.amount, cash.id);
   } else if (entry.type === 'transfer') {
-    if (entry.account_id) db.prepare('UPDATE accounts SET balance = balance + ? WHERE id=?').run(entry.amount, entry.account_id);
-    if (entry.target_account_id) db.prepare('UPDATE accounts SET balance = balance - ? WHERE id=?').run(entry.amount, entry.target_account_id);
+    applyAccountDelta(db, entry.account_id, entry.amount);
+    applyAccountDelta(db, entry.target_account_id, -entry.amount);
   } else if (entry.type === 'balance') {
     // 平账记录回滚：反向
     const cashBal = getCashAccount(db).balance;
@@ -132,7 +143,7 @@ function applyCashEffect(db, entry, cash) {
   } else if (entry.type === 'income') {
     db.prepare('UPDATE accounts SET balance = balance + ? WHERE id=?').run(entry.amount, cash.id);
   } else if (entry.type === 'transfer') {
-    if (entry.account_id) db.prepare('UPDATE accounts SET balance = balance - ? WHERE id=?').run(entry.amount, entry.account_id);
-    if (entry.target_account_id) db.prepare('UPDATE accounts SET balance = balance + ? WHERE id=?').run(entry.amount, entry.target_account_id);
+    applyAccountDelta(db, entry.account_id, -entry.amount);
+    applyAccountDelta(db, entry.target_account_id, entry.amount);
   }
 }
