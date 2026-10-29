@@ -30,11 +30,37 @@ npm start
 
 核心 API 流程：
 1. `POST /api/auth/login` 拿 token
-2. `POST /api/accounts/flatten` 平账
-3. `POST /api/entries` 逐条记账
-4. `POST /api/entries/balance` 清零现金
+2. `GET /api/categories` 获取记账分类
+3. `POST /api/accounts/flatten` 平账
+4. `POST /api/entries` 逐条记账
+5. `POST /api/entries/balance` 清零现金
 
 所有 API 需要 `Authorization: Bearer <token>`，金额单位是「分」。
+
+### 获取记账分类
+
+```
+GET /api/categories
+Authorization: Bearer <token>
+```
+
+返回（HTTP 200）：
+
+```json
+{
+  "expense": [
+    { "type": "expense", "name": "餐饮", "icon": "🍜", "color": "#f5a623", "sort": 0 }
+  ],
+  "income": [
+    { "type": "income", "name": "工资", "icon": "💰", "color": "#42a5f5", "sort": 0 }
+  ]
+}
+```
+
+- 按 `sort, id` 升序返回，字段：`type`（`expense` / `income`）、`name`、`icon`、`color`、`sort`。
+- 默认种子数据：支出 29 个、收入 12 个（含「平账」分类）。
+- 记账（`POST /api/entries`）时 `category` **必须取自这里的 `name`**，不要自己造分类名；无匹配时用收入侧的「其他」或最接近的分类。
+- 路由实现见 `src/routes/categories.js`，种子数据在 `src/db.js` 的 `DEFAULT_CATEGORIES`（改分类直接改这里 + 删库重建，目前无分类写入接口）。
 
 ## 目录结构
 
