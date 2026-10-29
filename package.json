@@ -6,7 +6,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "postinstall": "node -e \"try{require('better-sqlite3')(':memory:');console.log('better-sqlite3 加载正常')}catch(e){console.error('\\n⚠️ better-sqlite3 二进制与当前 Node 版本不匹配，请用 Node 22 重新执行：\\n  nvm use 22 && npm install\\n');process.exit(1)}\""
+  },
+  "engines": {
+    "node": ">=18 <23"
   },
   "dependencies": {
     "better-sqlite3": "^10.1.0",

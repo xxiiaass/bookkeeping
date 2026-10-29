@@ -7,6 +7,7 @@ const state = {
   month: new Date().toISOString().slice(0, 7),  // 账单/报表当前月份 YYYY-MM
   reportType: 'expense',  // 报表页 收入/支出 切换
   detailStatus: 'open',    // 应收/应付详情页 未完成/已完成 切换
+  hideAmount: false,       // 汇总金额是否隐藏（眼睛图标）
   // 录入
   entryType: 'expense',
   entryCategory: '',
@@ -33,11 +34,21 @@ async function api(path, opts = {}) {
 const fmt = (v) => ((v || 0) / 100).toFixed(2);
 const today = () => new Date().toISOString().slice(0, 10);
 const toFen = (val) => { const n = parseFloat(val); return isNaN(n) ? null : Math.round(n * 100); };
+const KEYPAD = ['7','8','9','⌫','4','5','6','C','1','2','3','.','0','确定'];
+const keypadHtml = () => KEYPAD.map(k => {
+  const cls = ['key'];
+  if (k === '确定') cls.push('key-ok', 'key-wide');
+  else if (k === '0') cls.push('key-wide');
+  return `<button class="${cls.join(' ')}" data-key="${k}">${k}</button>`;
+}).join('');
+let submitting = false;   // 录入提交防重复
 
 // ---------- Toast / 弹窗 ----------
-function toast(msg) {
+function toast(msg, type) {
   const t = $('#toast');
-  t.textContent = msg; t.classList.remove('hidden');
+  t.textContent = msg;
+  t.classList.remove('hidden', 'success', 'error');
+  if (type) t.classList.add(type);
   clearTimeout(t._timer);
   t._timer = setTimeout(() => t.classList.add('hidden'), 2200);
 }
@@ -97,13 +108,33 @@ function formDialog(title, fields, onSubmit) {
     });
   });
 
-  $('#form-ok').addEventListener('click', () => {
+  $('#form-ok').addEventListener('click', async () => {
     const result = {};
+    let missing = null;
     for (const f of fields) {
       const el = $(`#fd-${f.key}`);
-      result[f.key] = f.type === 'select' ? $(`#fd-${f.key}-hidden`).value : el.value;
+      const val = f.type === 'select' ? $(`#fd-${f.key}-hidden`).value : el.value;
+      if (f.required && !String(val ?? '').trim()) {
+        missing = missing || f;
+        el?.classList.add('error');
+      } else {
+        el?.classList.remove('error');
+      }
+      result[f.key] = val;
     }
-    close(); onSubmit(result);
+    if (missing) { toast(`请填写${missing.label}`, 'error'); return; }
+
+    const btn = $('#form-ok');
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '保存中…';
+    try {
+      await onSubmit(result);
+      close();
+    } catch (e) {
+      if (e.message !== 'unauthorized') toast('操作失败，请重试', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = original;
+    }
   });
 }
 
@@ -188,30 +219,38 @@ async function refresh() {
     state.accounts = accRes.accounts;
     renderSummary(reportRes);
     renderTab();
-  } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
+  } catch (e) {
+    if (e.message !== 'unauthorized') { toast('加载失败，请重试', 'error'); console.error(e); }
+  }
 }
 
-const PALETTE = ['#29abe2', '#ef5350', '#26c6da', '#ab47bc', '#5c6bc0', '#ec407a', '#ff7043', '#66bb6a', '#e57373', '#f9a825'];
+const PALETTE = ['#2563eb','#0891b2','#059669','#ea580c','#db2777','#7c3aed','#4f46e5','#d97706','#00897b','#6d4c41'];
 
 function renderSummary(report) {
   const card = $('#summary-card');
+  const hide = state.hideAmount;
+  const fmtAmt = (v) => hide ? '****' : '¥' + fmt(v);
   if (state.tab === 'assets') {
     card.classList.remove('hidden');
     card.innerHTML = `
-      <div><div class="label" id="assets-filter-trigger">资产 <span class="arrow">▼</span></div><div class="amount">¥${fmt(report.totalAsset)}</div><div class="sub">净资产 ¥${fmt(report.netAsset)}</div></div>
-      <div class="summary-right"><span class="eye" id="eye-toggle">👁</span></div>
+      <div><div class="label" id="assets-filter-trigger">资产 <span class="arrow">▼</span></div><div class="amount">${fmtAmt(report.totalAsset)}</div><div class="sub">净资产 ${fmtAmt(report.netAsset)}</div></div>
+      <div class="summary-right"><span class="eye" id="eye-toggle">${hide ? '🙈' : '👁'}</span></div>
     `;
     $('#assets-filter-trigger')?.addEventListener('click', () => showAccountFilter('asset'));
   } else if (state.tab === 'liabilities') {
     card.classList.remove('hidden');
     card.innerHTML = `
-      <div><div class="label" id="liab-filter-trigger">负债 <span class="arrow">▼</span></div><div class="amount">¥${fmt(report.totalLiability)}</div></div>
-      <div class="summary-right"><span class="eye" id="eye-toggle">👁</span></div>
+      <div><div class="label" id="liab-filter-trigger">负债 <span class="arrow">▼</span></div><div class="amount">${fmtAmt(report.totalLiability)}</div></div>
+      <div class="summary-right"><span class="eye" id="eye-toggle">${hide ? '🙈' : '👁'}</span></div>
     `;
     $('#liab-filter-trigger')?.addEventListener('click', () => showAccountFilter('liability'));
   } else {
     card.classList.add('hidden');
   }
+  $('#eye-toggle')?.addEventListener('click', () => {
+    state.hideAmount = !state.hideAmount;
+    renderSummary(report);
+  });
 }
 
 // 照抄口袋记账：点击「资产/负债」倒三角，弹出「选择要展示的账户」多选列表
@@ -233,20 +272,36 @@ function showAccountFilter(type) {
   const close = () => $('#form-modal').classList.add('hidden');
   $('#form-modal-close').addEventListener('click', close);
   $('#filter-ok').addEventListener('click', async () => {
-    const checks = $$('input[data-filter-id]');
-    for (const chk of checks) {
-      const id = Number(chk.dataset.filterId);
-      const shown = chk.checked ? 1 : 0;
-      const a = state.accounts.find(x => x.id === id);
-      if (a && a.shown !== shown) {
-        await api(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ shown }) });
+    const btn = $('#filter-ok');
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '保存中…';
+    try {
+      const checks = $$('input[data-filter-id]');
+      for (const chk of checks) {
+        const id = Number(chk.dataset.filterId);
+        const shown = chk.checked ? 1 : 0;
+        const a = state.accounts.find(x => x.id === id);
+        if (a && a.shown !== shown) {
+          await api(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ shown }) });
+        }
       }
+      close(); refresh();
+    } catch (e) {
+      if (e.message !== 'unauthorized') toast('保存失败，请重试', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = original;
     }
-    close(); refresh();
   });
 }
 
+function updateTopbar() {
+  const show = state.tab === 'assets' || state.tab === 'liabilities';
+  $('.topbar-left')?.classList.toggle('hidden', !show);
+  $('#go-report')?.classList.toggle('hidden', !show);
+}
+
 async function renderTab() {
+  updateTopbar();
   const c = $('#content');
   if (state.tab === 'assets') return renderAssets(c);
   if (state.tab === 'liabilities') return renderLiabilities(c);
@@ -260,27 +315,33 @@ function renderAssets(c) {
   const assets = state.accounts.filter(a => a.type === 'asset' && a.shown);
   const receivables = state.accounts.filter(a => a.type === 'receivable' && a.shown);
 
-  let html = assets.map((a, i) => `
-    <div class="account-card" style="background:${a.color || PALETTE[i % PALETTE.length]}" data-id="${a.id}">
+  let html = assets.map((a, i) => {
+    const color = a.color || PALETTE[i % PALETTE.length];
+    return `
+    <div class="account-card" style="background-color:${color};--card-c:${color}" data-id="${a.id}">
       <div class="acc-left">
         <div class="acc-icon">${a.name === '现金' ? '¥' : '🏦'}</div>
-        <div><div class="acc-name">${a.name}</div><div class="acc-sub">${a.sub_label || ''}</div></div>
+        <div><div class="acc-name">${a.name}</div><div class="acc-sub">${a.sub_label || '点击编辑'}</div></div>
       </div>
       <div class="acc-right"><div class="acc-balance">${fmt(a.balance)}</div></div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   if (receivables.length > 0) {
     html += `<div class="section-title">应收账款</div>`;
-    html += receivables.map((a, i) => `
-      <div class="account-card" style="background:${a.color || '#ff7043'}" data-recv="${a.id}">
+    html += receivables.map((a, i) => {
+      const color = a.color || '#ff7043';
+      return `
+      <div class="account-card" style="background-color:${color};--card-c:${color}" data-recv="${a.id}">
         <div class="acc-left">
           <div class="acc-icon">收</div>
           <div><div class="acc-name">${a.name}</div><div class="acc-sub">应收总额 · 点开看明细</div></div>
         </div>
         <div class="acc-right"><div class="acc-balance">${fmt(a.balance)}</div></div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   html += `<button class="add-account-btn" id="add-account-btn">＋ 添加账户</button>`;
@@ -302,33 +363,41 @@ function renderLiabilities(c) {
   const liabs = state.accounts.filter(a => a.type === 'liability' && a.shown);
   const payables = state.accounts.filter(a => a.type === 'payable' && a.shown);
 
-  let html = liabs.map((a, i) => `
-    <div class="account-card" style="background:${a.color || PALETTE[(i + 1) % PALETTE.length]}" data-id="${a.id}">
+  let html = liabs.map((a, i) => {
+    const color = a.color || PALETTE[(i + 1) % PALETTE.length];
+    return `
+    <div class="account-card" style="background-color:${color};--card-c:${color}" data-id="${a.id}">
       <div class="acc-left">
         <div class="acc-icon">💳</div>
         <div>
           <div class="acc-name">${a.name}</div>
-          <div class="acc-sub">${a.sub_label || ''}</div>
+          <div class="acc-sub">${a.sub_label || '点击编辑'}</div>
         </div>
       </div>
       <div class="acc-right">
-        <div class="acc-balance">${fmt(a.balance)}</div>
-        <div class="acc-extra">${a.credit_limit ? '剩余额度 ' + fmt(a.credit_limit) : ''}</div>
+        <div class="acc-nums">
+          <div class="acc-balance">${fmt(a.balance)}</div>
+          <div class="acc-extra">${a.credit_limit ? '剩余额度 ' + fmt(a.credit_limit) : ''}</div>
+        </div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   if (payables.length > 0) {
     html += `<div class="section-title">借款（我欠别人的钱）</div>`;
-    html += payables.map((a, i) => `
-      <div class="account-card" style="background:${a.color || '#ef6fa7'}" data-pay="${a.id}">
+    html += payables.map((a, i) => {
+      const color = a.color || '#ef6fa7';
+      return `
+      <div class="account-card" style="background-color:${color};--card-c:${color}" data-pay="${a.id}">
         <div class="acc-left">
           <div class="acc-icon">🏠</div>
           <div><div class="acc-name">${a.name}</div><div class="acc-sub">我欠别人的钱 · 点开看明细</div></div>
         </div>
         <div class="acc-right"><div class="acc-balance">${fmt(a.balance)}</div></div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   html += `<button class="add-account-btn" id="add-liab-btn">＋ 添加负债账户</button>`;
@@ -374,7 +443,7 @@ async function renderReceivableDetail(c, accountId) {
       html += `
         <div class="list-item" data-item="${it.id}">
           <div class="li-left">
-            <div class="li-icon" style="background:#ff8a3d">收</div>
+            <div class="li-icon" style="--ic:#ff8a3d">收</div>
             <div><div class="li-name">${it.name}</div><div class="li-sub">${it.status === 'done' ? '已结清' : ''}</div></div>
           </div>
           <div class="li-amount">${fmt(it.amount)}</div>
@@ -382,7 +451,7 @@ async function renderReceivableDetail(c, accountId) {
       `;
     }
   }
-  if (items.length === 0) html += `<div style="text-align:center;color:#999;padding:30px 0">暂无${status === 'done' ? '已完成' : '未完成'}记录</div>`;
+  if (items.length === 0) html += `<div class="empty-state"><div class="empty-emoji">🗒️</div><div class="empty-title">暂无${status === 'done' ? '已完成' : '未完成'}记录</div></div>`;
   html += `<button class="add-record-btn" id="add-item-btn">＋ 添加记录</button>`;
   c.innerHTML = html;
 
@@ -394,12 +463,16 @@ async function renderReceivableDetail(c, accountId) {
   $$('.list-item[data-item]').forEach(el => {
     el.addEventListener('click', async () => {
       const it = items.find(x => x.id == el.dataset.item);
-      if (it.status === 'done') {
-        const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
-        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderReceivableDetail(c, accountId); }
-      } else {
-        const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
-        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderReceivableDetail(c, accountId); }
+      try {
+        if (it.status === 'done') {
+          const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
+          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderReceivableDetail(c, accountId); }
+        } else {
+          const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
+          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderReceivableDetail(c, accountId); }
+        }
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast('操作失败，请重试', 'error');
       }
     });
   });
@@ -437,7 +510,7 @@ async function renderPayableDetail(c, accountId) {
       html += `
         <div class="list-item" data-item="${it.id}">
           <div class="li-left">
-            <div class="li-icon" style="background:#ef6fa7">付</div>
+            <div class="li-icon" style="--ic:#ef6fa7">付</div>
             <div><div class="li-name">${it.name}</div><div class="li-sub">${it.status === 'done' ? '已结清' : ''}</div></div>
           </div>
           <div class="li-amount">${fmt(it.amount)}</div>
@@ -445,7 +518,7 @@ async function renderPayableDetail(c, accountId) {
       `;
     }
   }
-  if (items.length === 0) html += `<div style="text-align:center;color:#999;padding:30px 0">暂无${status === 'done' ? '已完成' : '未完成'}记录</div>`;
+  if (items.length === 0) html += `<div class="empty-state"><div class="empty-emoji">🗒️</div><div class="empty-title">暂无${status === 'done' ? '已完成' : '未完成'}记录</div></div>`;
   html += `<button class="add-record-btn" id="add-item-btn">＋ 添加记录</button>`;
   c.innerHTML = html;
 
@@ -457,12 +530,16 @@ async function renderPayableDetail(c, accountId) {
   $$('.list-item[data-item]').forEach(el => {
     el.addEventListener('click', async () => {
       const it = items.find(x => x.id == el.dataset.item);
-      if (it.status === 'done') {
-        const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
-        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderPayableDetail(c, accountId); }
-      } else {
-        const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
-        if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderPayableDetail(c, accountId); }
+      try {
+        if (it.status === 'done') {
+          const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
+          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderPayableDetail(c, accountId); }
+        } else {
+          const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
+          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderPayableDetail(c, accountId); }
+        }
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast('操作失败，请重试', 'error');
       }
     });
   });
@@ -500,7 +577,7 @@ async function renderEntries(c) {
 
   const sortedDates = Object.keys(groups).sort().reverse();
   if (sortedDates.length === 0) {
-    html += `<div style="text-align:center;color:#999;padding:40px 0">本月暂无流水</div>`;
+    html += `<div class="empty-state"><div class="empty-emoji">📋</div><div class="empty-title">本月暂无流水</div><div class="empty-desc">点击下方 ＋ 记一笔</div></div>`;
   }
   for (const date of sortedDates) {
     const day = date.slice(8, 10);
@@ -513,8 +590,8 @@ async function renderEntries(c) {
       html += `
         <div class="list-item" data-id="${e.id}">
           <div class="li-left">
-            <div class="li-icon" style="background:${ci.color}">${ci.icon}</div>
-            <div><div class="li-name">${e.category || e.type}${e.is_balance ? ' ⚖️' : ''}</div><div class="li-sub">${e.note || (e.type === 'transfer' ? '转账' : '')}</div></div>
+            <div class="li-icon" style="--ic:${ci.color}">${ci.icon}</div>
+            <div><div class="li-name">${e.category || e.type}${e.is_balance ? ' ⚖️' : ''}</div><div class="li-sub">${e.note || (e.type === 'transfer' ? '转账' : '点击修改')}</div></div>
           </div>
           <div class="li-amount ${isIncome ? 'amount-income' : 'amount-expense'}">${sign}${fmt(e.amount)}</div>
         </div>
@@ -530,12 +607,14 @@ async function renderEntries(c) {
   $('#mn-prev')?.addEventListener('click', () => { shiftMonth(-1); renderTab(); });
   $('#mn-next')?.addEventListener('click', () => { shiftMonth(1); renderTab(); });
   $('#balance-btn')?.addEventListener('click', async () => {
+    const ok = await confirmDialog('将把现金余额清零并记一笔平账，确认？');
+    if (!ok) return;
     formDialog('记平账', [
       { key: 'date', label: '日期', type: 'date', value: today() },
       { key: 'note', label: '备注', type: 'text', value: '一般性支出（平账）' },
     ], async (r) => {
       await api('/api/entries/balance', { method: 'POST', body: JSON.stringify({ date: r.date, note: r.note }) });
-      toast('已平账清零'); refresh();
+      toast('已平账清零', 'success'); refresh();
     });
   });
 }
@@ -550,12 +629,12 @@ async function renderReport(c) {
   list.sort((a, b) => b.amount - a.amount);
   list.forEach(it => it.pct = total ? it.amount / total : 0);
 
-  // 环形图用 SVG
-  const chartColors = ['#3b82f6', '#f5a623', '#ab47bc', '#ff8a3d', '#f9a825', '#a1887f', '#26c6da', '#8e9eef', '#66bb6a', '#ef5350', '#42a5f5'];
+  // 环形图用 SVG（分段颜色取真实分类色）
   let segs = '';
   let acc = 0;
   const R = 70, CX = 90, CY = 90;
   list.forEach((it, i) => {
+    const color = catInfo(rt, it.name).color;
     const start = acc, end = acc + it.pct;
     acc = end;
     const a0 = start * 2 * Math.PI - Math.PI / 2;
@@ -563,7 +642,7 @@ async function renderReport(c) {
     const x0 = CX + R * Math.cos(a0), y0 = CY + R * Math.sin(a0);
     const x1 = CX + R * Math.cos(a1), y1 = CY + R * Math.sin(a1);
     const large = (end - start) > 0.5 ? 1 : 0;
-    segs += `<path d="M ${CX} ${CY} L ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} Z" fill="${chartColors[i % chartColors.length]}"></path>`;
+    segs += `<path d="M ${CX} ${CY} L ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} Z" fill="${color}" stroke="#fff" stroke-width="2"></path>`;
   });
 
   const [y, m] = state.month.split('-');
@@ -582,7 +661,7 @@ async function renderReport(c) {
       <div class="report-donut">
         <svg width="180" height="180" viewBox="0 0 180 180">
           ${total === 0 ? `<circle cx="90" cy="90" r="70" fill="#eee"></circle>` : segs}
-          <circle cx="90" cy="90" r="40" fill="#f7f3ec"></circle>
+          <circle cx="90" cy="90" r="40" fill="#fff"></circle>
         </svg>
         <div class="report-center">
           <div class="rc-label">${rtLabel}</div>
@@ -596,18 +675,18 @@ async function renderReport(c) {
     const ci = catInfo(rt, it.name);
     html += `
       <div class="cat-stat">
-        <div class="li-icon" style="background:${ci.color}">${ci.icon}</div>
+        <div class="li-icon" style="--ic:${ci.color}">${ci.icon}</div>
         <div style="flex:1;margin:0 8px">
           <div style="display:flex;justify-content:space-between;font-size:14px">
             <span>${it.name}</span><span>${(it.pct * 100).toFixed(1)}%</span>
           </div>
           <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${(it.pct * 100).toFixed(1)}%;background:${ci.color}"></div></div>
         </div>
-        <div style="font-weight:600;font-size:14px">${fmt(it.amount)}</div>
+        <div class="cat-stat-amount">${fmt(it.amount)}</div>
       </div>
     `;
   }
-  if (list.length === 0) html += `<div style="text-align:center;color:#999;padding:40px 0">本月暂无${rt === 'income' ? '收入' : '支出'}</div>`;
+  if (list.length === 0) html += `<div class="empty-state"><div class="empty-emoji">📊</div><div class="empty-title">本月暂无${rt === 'income' ? '收入' : '支出'}</div></div>`;
   c.innerHTML = html;
 
   $('#rm-prev').addEventListener('click', () => { shiftMonth(-1); renderTab(); });
@@ -665,29 +744,42 @@ async function renderSettings(c) {
       pass: $('#set-smtp-pass').value,
       to: $('#set-smtp-to').value.trim(),
     };
-    await api('/api/auth/settings', { method: 'POST', body: JSON.stringify({ web_password: $('#set-pwd').value, smtp }) });
-    toast('设置已保存');
-  });
-  $('#send-backup-btn').addEventListener('click', async () => {
-    // 先保存当前 SMTP 配置，再发送
-    const smtp = {
-      host: $('#set-smtp-host').value.trim(),
-      port: parseInt($('#set-smtp-port').value) || 465,
-      user: $('#set-smtp-user').value.trim(),
-      pass: $('#set-smtp-pass').value,
-      to: $('#set-smtp-to').value.trim(),
-    };
-    await api('/api/auth/settings', { method: 'POST', body: JSON.stringify({ web_password: $('#set-pwd').value, smtp }) });
-    toast('正在发送备份邮件...');
+    const btn = $('#save-settings-btn');
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '保存中…';
     try {
-      const r = await api('/api/auth/backup', { method: 'POST', body: JSON.stringify({}) });
-      if (r.ok) toast(`备份已发送至 ${r.sentTo}`);
-      else toast(r.message || '发送失败：请先填写完整的 SMTP 配置');
+      await api('/api/auth/settings', { method: 'POST', body: JSON.stringify({ web_password: $('#set-pwd').value, smtp }) });
+      toast('设置已保存', 'success');
     } catch (e) {
-      toast('发送失败：' + (e.message || '未知错误'));
+      if (e.message !== 'unauthorized') toast('保存失败，请重试', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = original;
     }
   });
-  $('#token-box').addEventListener('click', () => { navigator.clipboard.writeText(state.token); toast('Token 已复制'); });
+  $('#send-backup-btn').addEventListener('click', async () => {
+    const btn = $('#send-backup-btn');
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '发送中…';
+    try {
+      // 先保存当前 SMTP 配置，再发送
+      const smtp = {
+        host: $('#set-smtp-host').value.trim(),
+        port: parseInt($('#set-smtp-port').value) || 465,
+        user: $('#set-smtp-user').value.trim(),
+        pass: $('#set-smtp-pass').value,
+        to: $('#set-smtp-to').value.trim(),
+      };
+      await api('/api/auth/settings', { method: 'POST', body: JSON.stringify({ web_password: $('#set-pwd').value, smtp }) });
+      const r = await api('/api/auth/backup', { method: 'POST', body: JSON.stringify({}) });
+      if (r.ok) toast(`备份已发送至 ${r.sentTo}`, 'success');
+      else toast(r.message || '发送失败：请先填写完整的 SMTP 配置', 'error');
+    } catch (e) {
+      if (e.message !== 'unauthorized') toast('发送失败：' + (e.message || '未知错误'), 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = original;
+    }
+  });
+  $('#token-box').addEventListener('click', () => { navigator.clipboard.writeText(state.token); toast('Token 已复制', 'success'); });
   $('#periodic-manage-btn').addEventListener('click', () => renderPeriodic(c));
 }
 
@@ -699,7 +791,7 @@ async function renderPeriodic(c) {
   html += list.map(p => `
     <div class="list-item" data-p="${p.id}">
       <div class="li-left">
-        <div class="li-icon" style="background:#5c6bc0">🔄</div>
+        <div class="li-icon" style="--ic:#5c6bc0">🔄</div>
         <div><div class="li-name">${p.name} ${p.enabled ? '' : '(停用)'}</div><div class="li-sub">${cronDesc(p.cron)} · 下次 ${(p.next_run || '').slice(0, 10)}</div></div>
       </div>
       <div class="li-amount">¥${fmt(p.amount)}</div>
@@ -758,7 +850,7 @@ function renderEntryModal() {
         <input type="text" id="entry-note" value="${state.entryNote}" placeholder="可选" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
       </div>
       <div class="keypad">
-        ${['7','8','9','⌫','4','5','6','+','1','2','3','−','C','0','.','确定'].map(k => `<button class="key ${k === '确定' ? 'key-ok' : ''}" data-key="${k}">${k}</button>`).join('')}
+        ${keypadHtml()}
       </div>
     `}
   `;
@@ -792,7 +884,7 @@ function transferForm() {
       <input type="text" id="entry-note" value="${state.entryNote}" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
     </div>
     <div class="keypad">
-      ${['7','8','9','⌫','4','5','6','+','1','2','3','−','C','0','.','确定'].map(k => `<button class="key ${k === '确定' ? 'key-ok' : ''}" data-key="${k}">${k}</button>`).join('')}
+      ${keypadHtml()}
     </div>
   `;
 }
@@ -807,19 +899,27 @@ function handleKey(k) {
 }
 
 async function submitEntry() {
+  if (submitting) return;
   const amount = toFen(state.entryAmount);
-  if (!amount) { toast('请输入金额'); return; }
+  if (!amount) { toast('请输入金额', 'error'); return; }
   const date = $('#entry-date')?.value || state.entryDate;
   const note = $('#entry-note')?.value || '';
-  if (state.entryType === 'transfer') {
-    const fromId = Number($('#tr-from').value);
-    const toId = Number($('#tr-to').value);
-    if (fromId === toId) { toast('转出和转入账户不能相同'); return; }
-    await api('/api/entries', { method: 'POST', body: JSON.stringify({ date, type: 'transfer', account_id: fromId, target_account_id: toId, amount, note }) });
-  } else {
-    await api('/api/entries', { method: 'POST', body: JSON.stringify({ date, type: state.entryType, category: state.entryCategory || '其他', amount, note }) });
+  submitting = true;
+  try {
+    if (state.entryType === 'transfer') {
+      const fromId = Number($('#tr-from').value);
+      const toId = Number($('#tr-to').value);
+      if (fromId === toId) { toast('转出和转入账户不能相同', 'error'); return; }
+      await api('/api/entries', { method: 'POST', body: JSON.stringify({ date, type: 'transfer', account_id: fromId, target_account_id: toId, amount, note }) });
+    } else {
+      await api('/api/entries', { method: 'POST', body: JSON.stringify({ date, type: state.entryType, category: state.entryCategory || '其他', amount, note }) });
+    }
+    closeEntryModal(); refresh();
+  } catch (e) {
+    if (e.message !== 'unauthorized') toast('保存失败，请重试', 'error');
+  } finally {
+    submitting = false;
   }
-  closeEntryModal(); refresh();
 }
 
 // ---------- 各类表单弹窗 ----------
@@ -831,14 +931,14 @@ function addAccountDialog(type = 'asset') {
     ['payable', '应付（我欠别人的钱）'],
   ];
   formDialog('添加账户', [
-    { key: 'name', label: '账户名称', type: 'text', placeholder: '如：招商银行' },
+    { key: 'name', label: '账户名称', type: 'text', placeholder: '如：招商银行', required: true },
     { key: 'type', label: '账户类型', type: 'select', value: type, options: typeOptions },
     { key: 'sub_label', label: '副标题', type: 'text', placeholder: '如：储蓄卡' },
     { key: 'balance', label: '初始余额（元）', type: 'text', value: '0' },
   ], async (r) => {
     const balance = toFen(r.balance);
     await api('/api/accounts', { method: 'POST', body: JSON.stringify({ name: r.name, type: r.type, sub_label: r.sub_label, balance: balance ?? 0 }) });
-    toast('已添加'); refresh();
+    toast('已添加', 'success'); refresh();
   });
 }
 
@@ -851,7 +951,7 @@ function editAccount(id) {
     { key: 'balance', label: '余额（元）', type: 'text', value: fmt(a.balance) },
   ], async (r) => {
     await api(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ name: r.name, sub_label: r.sub_label, balance: toFen(r.balance) ?? a.balance }) });
-    toast('已保存'); refresh();
+    toast('已保存', 'success'); refresh();
   });
 }
 
@@ -861,11 +961,11 @@ function editEntry(id, e) {
   const catOptions = (isIncome ? state.categories.income : state.categories.expense).map(c => [c.name, c.name]);
   formDialog('修改账单', [
     { key: 'category', label: '分类', type: 'select', value: e.category, options: catOptions },
-    { key: 'amount', label: '金额（元）', type: 'text', value: fmt(e.amount) },
+    { key: 'amount', label: '金额（元）', type: 'text', value: fmt(e.amount), required: true },
     { key: 'note', label: '备注', type: 'text', value: e.note },
   ], async (r) => {
     await api(`/api/entries/${id}`, { method: 'PATCH', body: JSON.stringify({ category: r.category, amount: toFen(r.amount) ?? e.amount, note: r.note }) });
-    toast('已修改'); refresh();
+    toast('已修改', 'success'); refresh();
   });
 }
 
@@ -873,11 +973,11 @@ function addItemDialog(type, accountId) {
   const label = type === 'receivable' ? '借给谁' : '向谁借';
   formDialog(type === 'receivable' ? '添加应收' : '添加应付', [
     { key: 'name', label: label, type: 'text' },
-    { key: 'amount', label: '金额（元）', type: 'text' },
+    { key: 'amount', label: '金额（元）', type: 'text', required: true },
     { key: 'date', label: '日期', type: 'date', value: today() },
   ], async (r) => {
     await api('/api/receivables', { method: 'POST', body: JSON.stringify({ account_id: accountId, name: r.name, amount: toFen(r.amount) ?? 0, date: r.date, status: 'open' }) });
-    toast('已添加'); renderTab();
+    toast('已添加', 'success'); renderTab();
   });
 }
 
@@ -885,17 +985,17 @@ function addPeriodicDialog() {
   const expenseCats = state.categories.expense.map(c => [c.name, c.name]);
   const incomeCats = state.categories.income.map(c => [c.name, c.name]);
   formDialog('添加周期账', [
-    { key: 'name', label: '名称（如"房贷"）', type: 'text' },
+    { key: 'name', label: '名称（如"房贷"）', type: 'text', required: true },
     { key: 'type', label: '类型', type: 'select', value: 'expense', options: [['expense', '支出'], ['income', '收入']] },
     { key: 'category', label: '分类', type: 'select', value: '房贷', options: expenseCats },
-    { key: 'amount', label: '金额（元）', type: 'text' },
+    { key: 'amount', label: '金额（元）', type: 'text', required: true },
     { key: 'cron', label: '周期', type: 'select', value: 'MONTHLY:1', options: [
       ['MONTHLY:1', '每月1号'], ['MONTHLY:5', '每月5号'], ['MONTHLY:10', '每月10号'],
       ['MONTHLY:15', '每月15号'], ['MONTHLY:20', '每月20号'], ['MONTHLY:28', '每月28号'],
     ]},
   ], async (r) => {
     await api('/api/periodic', { method: 'POST', body: JSON.stringify({ name: r.name, type: r.type, category: r.category, amount: toFen(r.amount) ?? 0, cron: r.cron }) });
-    toast('已添加'); renderPeriodic($('#content'));
+    toast('已添加', 'success'); renderPeriodic($('#content'));
   });
 
   // 类型切换时，动态更新分类下拉的选项
@@ -956,7 +1056,7 @@ function bindEvents() {
 }
 
 function setNavActive(nav) {
-  const map = { assets: 'assets', report: 'report', entries: 'entries', settings: 'settings' };
+  const map = { assets: 'assets', report: 'report', entries: 'entries', settings: 'settings', liabilities: 'assets' };
   const target = map[nav] || nav;
   $$('.nav-btn').forEach(n => {
     const isAdd = n.dataset.nav === 'add';
