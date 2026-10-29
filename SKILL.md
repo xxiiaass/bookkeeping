@@ -5,7 +5,7 @@ description: AI 记账工具的操作手册。当用户要求「记账」「平�
 
 # AI 记账工具 · 操作手册
 
-这是一个本地记账工具，后端运行在 `http://localhost:3000`，数据存 SQLite。**所有金额单位是「分」（整数）**，展示时除以 100 才是元。
+这是一个本地记账工具，后端运行在 `http://kevinxia.online:3000`，数据存 SQLite。**所有金额单位是「分」（整数）**，展示时除以 100 才是元。
 
 ## 鉴权
 
@@ -15,7 +15,7 @@ description: AI 记账工具的操作手册。当用户要求「记账」「平�
 Authorization: Bearer <API_TOKEN>
 ```
 
-获取 token：`POST /api/auth/login`，body `{"password":"网页密码"}`（默认 `admin123`），响应 `{ok:true, token:"..."}`。用返回的 `token` 作为后续所有请求的 Bearer token。
+token找用户获取，或者从项目目录.env获取
 
 ## 核心记账模型（务必理解）
 
@@ -23,7 +23,7 @@ Authorization: Bearer <API_TOKEN>
 
 1. **平账**：把各账户对齐到实际余额，差额净流入现金账户。
 2. **记账**：所有明细支出/收入都从现金账户走。
-3. **清零**：记完明细后，按现金余额记一条「平账记录」，让现金归零（差额即"无法逐笔统计的一般性支出/收入"）。
+3. **清零**：记完明细后，按现金余额记一条「平账记录」，让现金归零（差额即"无法逐笔统计的一般性支出/收入"），由用户自己操作执行。
 
 ## API 一览
 
@@ -52,30 +52,19 @@ Authorization: Bearer <API_TOKEN>
 - `PATCH /api/entries/:id` → 修改单条（微调）
 - `DELETE /api/entries/:id` → 删除单条
 
-### 平账清零（重点）
-- `POST /api/entries/balance` → body `{"date":"2026-10-27","note":"一般性支出"}`，计算当前现金余额并记一条平账记录使其归零。返回 `{entry, cleared, cashBefore}`。
-
-### 周期账
-- `GET /api/periodic` / `POST /api/periodic` → 列表/新建
-- 新建 body：`{"name":"房贷","type":"expense","category":"房贷","amount":500000,"cron":"MONTHLY:1"}`
-- `cron` 支持简写 `MONTHLY:1`（每月1号）或标准 5 段 cron
-- `POST /api/periodic/run-due` → 手动触发到期检查
-
-### 应收/应付
-- `GET /api/receivables?type=receivable|payable` → 明细列表
-- `POST /api/receivables` → 新建，body `{account_id, name, amount, date, status}`
-- `PATCH /api/receivables/:id` → 修改（含 `status: "done"` 标记结清）
-
-### 报告
-- `GET /api/report?month=2026-10` → `{totalAsset, totalLiability, receivable, payable, netAsset, monthly:{income,expense,balance}, accounts}`
 
 ## 典型记账流程（发给 AI 截图后，AI 应这样做）
 
 1. 从截图识别各账户「实际余额」和「消费记录」。
-2. 调 `POST /api/accounts/flatten` 平账（账户 id 需先 `GET /api/accounts` 查映射）。
-3. 逐条调 `POST /api/entries` 记账（分类从截图识别，支出用 expense、收入用 income）。
-4. 调 `POST /api/entries/balance` 清零现金。
-5. 回读 `GET /api/report` 告知用户总资产/净资产/本月收支，请其确认是否微调。
+  a. 消费的记录，100元以上单独记录，100元以下的三餐餐饮、停车费、小额日常开销支出，汇总记录一条“月餐饮”，100元以下的网购消费，汇总后，一个平台一条记录，备注好购买的内容清单，简单说明即可，一两个字说明一个物品。
+  b. 具体消费到哪个分类，需要拉取全量的分类列表后，具体评估。
+2. 逐条调 `POST /api/entries` 记账（分类从截图识别，支出用 expense、收入用 income）。
+3. 调 `POST /api/accounts/flatten` 平账（账户 id 需先 `GET /api/accounts` 查映射）。
+  a. 涉及股票的账户比较特殊，无法直接对账，因为股票每天都在浮动，所以股票账户只通过账户出入金记录“投资额”。而不是像其他账户一样直接对总金额。
+  b. 对于信用卡账户，不能直接比对当期账单来计算负债，需要使用总额度-可用额度来比对。
+  c. 对于装修贷，比较特殊，属于分期的内容，记录到信用卡中，需要根据每次还款金额，和总额度的变化，计算出每期利息，记录一笔利息支出。
+  d. 对于微粒贷，类似于装修贷，需要特别注意的是，微粒贷的额度有可能自动变化，所以每次都要从截图获取当前总额度、已用额度，来计算本金的变化，并从还款记录计算利息。
+
 
 ## 注意事项
 

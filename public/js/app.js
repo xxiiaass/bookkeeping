@@ -53,14 +53,19 @@ function toast(msg, type) {
   t._timer = setTimeout(() => t.classList.add('hidden'), 2200);
 }
 
+function lockBody() { document.body.style.overflow = 'hidden'; }
+function unlockBody() { document.body.style.overflow = ''; }
+
 function confirmDialog(text) {
   return new Promise((resolve) => {
     $('#confirm-text').textContent = text;
     $('#confirm-modal').classList.remove('hidden');
+    lockBody();
     const onOk = () => { cleanup(); resolve(true); };
     const onCancel = () => { cleanup(); resolve(false); };
     const cleanup = () => {
       $('#confirm-modal').classList.add('hidden');
+      unlockBody();
       $('#confirm-ok').removeEventListener('click', onOk);
       $('#confirm-cancel').removeEventListener('click', onCancel);
     };
@@ -96,7 +101,8 @@ function formDialog(title, fields, onSubmit) {
   body.innerHTML += `<div class="form-actions"><button class="btn-ghost" id="form-cancel">取消</button><button class="btn-primary" id="form-ok">确定</button></div>`;
 
   $('#form-modal').classList.remove('hidden');
-  const close = () => $('#form-modal').classList.add('hidden');
+  lockBody();
+  const close = () => { $('#form-modal').classList.add('hidden'); unlockBody(); };
   $('#form-cancel').addEventListener('click', close);
   $('#form-modal-close').addEventListener('click', close);
 
@@ -269,7 +275,8 @@ function showAccountFilter(type) {
   body.innerHTML += `<div class="form-actions"><button class="btn-primary" id="filter-ok">确定</button></div>`;
 
   $('#form-modal').classList.remove('hidden');
-  const close = () => $('#form-modal').classList.add('hidden');
+  lockBody();
+  const close = () => { $('#form-modal').classList.add('hidden'); unlockBody(); };
   $('#form-modal-close').addEventListener('click', close);
   $('#filter-ok').addEventListener('click', async () => {
     const btn = $('#filter-ok');
@@ -321,7 +328,7 @@ function renderAssets(c) {
     <div class="account-card" style="background-color:${color};--card-c:${color}" data-id="${a.id}">
       <div class="acc-left">
         <div class="acc-icon">${a.name === '现金' ? '¥' : '🏦'}</div>
-        <div><div class="acc-name">${a.name}</div><div class="acc-sub">${a.sub_label || '点击编辑'}</div></div>
+        <div><div class="acc-name">${a.name}</div><div class="acc-sub">${a.sub_label || '点击查看流水'}</div></div>
       </div>
       <div class="acc-right"><div class="acc-balance">${fmt(a.balance)}</div></div>
     </div>
@@ -347,9 +354,9 @@ function renderAssets(c) {
   html += `<button class="add-account-btn" id="add-account-btn">＋ 添加账户</button>`;
   c.innerHTML = html;
 
-  // 点击资产账户 → 编辑
+  // 点击资产账户 → 进入账户详情（流水）
   $$('.account-card[data-id]').forEach(el => {
-    el.addEventListener('click', () => editAccount(Number(el.dataset.id)));
+    el.addEventListener('click', () => renderAccountDetail(c, Number(el.dataset.id)));
   });
   // 点击应收 → 进入应收明细页
   $$('.account-card[data-recv]').forEach(el => {
@@ -371,13 +378,13 @@ function renderLiabilities(c) {
         <div class="acc-icon">💳</div>
         <div>
           <div class="acc-name">${a.name}</div>
-          <div class="acc-sub">${a.sub_label || '点击编辑'}</div>
+          <div class="acc-sub">${a.sub_label || '点击查看流水'}</div>
         </div>
       </div>
       <div class="acc-right">
         <div class="acc-nums">
           <div class="acc-balance">${fmt(a.balance)}</div>
-          <div class="acc-extra">${a.credit_limit ? '剩余额度 ' + fmt(a.credit_limit) : ''}</div>
+          <div class="acc-extra">${a.credit_limit ? '可用额度 ' + fmt(a.credit_limit - a.balance) : ''}</div>
         </div>
       </div>
     </div>
@@ -404,7 +411,7 @@ function renderLiabilities(c) {
   c.innerHTML = html;
 
   $$('.account-card[data-id]').forEach(el => {
-    el.addEventListener('click', () => editAccount(Number(el.dataset.id)));
+    el.addEventListener('click', () => renderAccountDetail(c, Number(el.dataset.id)));
   });
   $$('.account-card[data-pay]').forEach(el => {
     el.addEventListener('click', () => renderPayableDetail(c, Number(el.dataset.pay)));
@@ -546,10 +553,11 @@ async function renderPayableDetail(c, accountId) {
   $('#add-item-btn').addEventListener('click', () => addItemDialog('payable', accountId));
 }
 
-// ---------- 账单流水页（照抄） ----------
+// ---------- 账单流水页（不含转账，转账在账户详情页看） ----------
 async function renderEntries(c) {
   const res = await api(`/api/entries?month=${state.month}&limit=500`);
-  const entries = res.entries;
+  // 过滤掉转账记录
+  const entries = res.entries.filter(e => e.type !== 'transfer');
 
   // 月度汇总
   let income = 0, expense = 0;
@@ -586,12 +594,12 @@ async function renderEntries(c) {
     for (const e of groups[date]) {
       const isIncome = e.type === 'income';
       const ci = catInfo(isIncome ? 'income' : 'expense', e.category);
-      const sign = isIncome ? '+' : e.type === 'transfer' ? '⇄' : '-';
+      const sign = isIncome ? '+' : '-';
       html += `
         <div class="list-item" data-id="${e.id}">
           <div class="li-left">
             <div class="li-icon" style="--ic:${ci.color}">${ci.icon}</div>
-            <div><div class="li-name">${e.category || e.type}${e.is_balance ? ' ⚖️' : ''}</div><div class="li-sub">${e.note || (e.type === 'transfer' ? '转账' : '点击修改')}</div></div>
+            <div><div class="li-name">${e.category || e.type}${e.is_balance ? ' ⚖️' : ''}</div><div class="li-sub">${e.note || '点击修改'}</div></div>
           </div>
           <div class="li-amount ${isIncome ? 'amount-income' : 'amount-expense'}">${sign}${fmt(e.amount)}</div>
         </div>
@@ -615,6 +623,87 @@ async function renderEntries(c) {
     ], async (r) => {
       await api('/api/entries/balance', { method: 'POST', body: JSON.stringify({ date: r.date, note: r.note }) });
       toast('已平账清零', 'success'); refresh();
+    });
+  });
+}
+
+// ---------- 账户详情页（点击账户进入，显示该账户所有流水含转账） ----------
+async function renderAccountDetail(c, accountId) {
+  const a = state.accounts.find(x => x.id === accountId);
+  if (!a) return;
+  const res = await api(`/api/accounts/${accountId}/entries`);
+  const entries = res.entries || [];
+
+  const isLiability = a.type === 'liability';
+  const headerColor = isLiability ? '#ef5350' : (a.color || '#2563eb');
+  const balanceLabel = isLiability ? '已用额度' : '余额';
+
+  let html = `
+    <div class="detail-header" style="background:${headerColor};color:#fff;border-radius:0 0 16px 16px;padding:16px;margin:-8px -12px 12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:16px;cursor:pointer" id="acc-back">‹ 返回</span>
+        <span style="font-size:14px;cursor:pointer" id="acc-edit">编辑</span>
+        <span style="font-size:14px;width:40px"></span>
+      </div>
+      <div style="text-align:center;margin-bottom:8px;">
+        <div style="font-size:14px;opacity:.9">${a.name}</div>
+        <div style="font-size:28px;font-weight:700">¥${fmt(a.balance)}</div>
+        <div style="font-size:12px;opacity:.8">${balanceLabel}${a.credit_limit ? ' · 总额度 ¥' + fmt(a.credit_limit) + ' · 可用 ¥' + fmt(a.credit_limit - a.balance) : ''}</div>
+      </div>
+    </div>
+  `;
+
+  // 按日期分组
+  const groups = {};
+  for (const e of entries) (groups[e.date] ||= []).push(e);
+  const sortedDates = Object.keys(groups).sort().reverse();
+
+  if (sortedDates.length === 0) {
+    html += `<div class="empty-state"><div class="empty-emoji">📋</div><div class="empty-title">暂无流水</div></div>`;
+  }
+  for (const date of sortedDates) {
+    const day = date.slice(8, 10);
+    html += `<div class="group-date"><span class="gdot">${day}日</span></div>`;
+    for (const e of groups[date]) {
+      const isTransfer = e.type === 'transfer';
+      const isIncome = e.type === 'income';
+      const ci = isTransfer ? { icon: '⇄', color: '#5c6bc0' } : catInfo(isIncome ? 'income' : 'expense', e.category);
+      let sign, amountCls, subText;
+      if (isTransfer) {
+        // 判断该账户是转出方还是转入方
+        const isOut = e.account_id === accountId;
+        sign = isOut ? '↓' : '↑';
+        const otherId = isOut ? e.target_account_id : e.account_id;
+        const other = state.accounts.find(x => x.id === otherId);
+        subText = (isOut ? '转出到 ' : '转入自 ') + (other ? other.name : '?') + (e.note ? ' · ' + e.note : '');
+        amountCls = 'amount-transfer';
+      } else {
+        sign = isIncome ? '+' : '-';
+        subText = e.note || '点击修改';
+        amountCls = isIncome ? 'amount-income' : 'amount-expense';
+      }
+      html += `
+        <div class="list-item" data-id="${e.id}">
+          <div class="li-left">
+            <div class="li-icon" style="--ic:${ci.color}">${ci.icon}</div>
+            <div><div class="li-name">${isTransfer ? '转账' : (e.category || e.type)}${e.is_balance ? ' ⚖️' : ''}</div><div class="li-sub">${subText}</div></div>
+          </div>
+          <div class="li-amount ${amountCls}">${sign}${fmt(e.amount)}</div>
+        </div>
+      `;
+    }
+  }
+  c.innerHTML = html;
+
+  $('#acc-back').addEventListener('click', () => {
+    state.tab = isLiability ? 'liabilities' : 'assets';
+    refresh();
+  });
+  $('#acc-edit').addEventListener('click', () => editAccount(accountId));
+  $$('.list-item[data-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const e = entries.find(x => x.id == el.dataset.id);
+      editEntry(Number(el.dataset.id), e);
     });
   });
 }
@@ -823,9 +912,10 @@ function cronDesc(cron) {
 function openEntryModal() {
   state.entryType = 'expense'; state.entryCategory = ''; state.entryAmount = ''; state.entryNote = '';
   $('#entry-modal').classList.remove('hidden');
+  lockBody();
   renderEntryModal();
 }
-function closeEntryModal() { $('#entry-modal').classList.add('hidden'); }
+function closeEntryModal() { $('#entry-modal').classList.add('hidden'); unlockBody(); }
 
 function renderEntryModal() {
   const body = $('#entry-body');
@@ -945,18 +1035,50 @@ function addAccountDialog(type = 'asset') {
 function editAccount(id) {
   const a = state.accounts.find(x => x.id === id);
   if (!a) return;
-  formDialog('编辑账户', [
+  const fields = [
     { key: 'name', label: '账户名称', type: 'text', value: a.name },
     { key: 'sub_label', label: '副标题', type: 'text', value: a.sub_label },
     { key: 'balance', label: '余额（元）', type: 'text', value: fmt(a.balance) },
-  ], async (r) => {
-    await api(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ name: r.name, sub_label: r.sub_label, balance: toFen(r.balance) ?? a.balance }) });
+  ];
+  // 信用卡/贷款类账户支持编辑额度
+  if (a.type === 'liability') {
+    fields.push({ key: 'credit_limit', label: '总额度（元）', type: 'text', value: fmt(a.credit_limit) });
+  }
+  formDialog('编辑账户', fields, async (r) => {
+    const payload = {
+      name: r.name,
+      sub_label: r.sub_label,
+      balance: toFen(r.balance) ?? a.balance,
+    };
+    if (a.type === 'liability') payload.credit_limit = toFen(r.credit_limit) ?? a.credit_limit;
+    await api(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
     toast('已保存', 'success'); refresh();
   });
 }
 
 function editEntry(id, e) {
   if (!e) return;
+  // 转账记录：显示转账编辑表单
+  if (e.type === 'transfer') {
+    const accs = state.accounts.filter(a => a.type === 'asset' || a.type === 'liability');
+    formDialog('修改转账', [
+      { key: 'from', label: '转出账户', type: 'select', value: e.account_id, options: accs.map(a => [a.id, a.name]) },
+      { key: 'to', label: '转入账户', type: 'select', value: e.target_account_id, options: accs.map(a => [a.id, a.name]) },
+      { key: 'amount', label: '金额（元）', type: 'text', value: fmt(e.amount), required: true },
+      { key: 'note', label: '备注', type: 'text', value: e.note },
+    ], async (r) => {
+      const fromId = Number(r.from);
+      const toId = Number(r.to);
+      if (fromId === toId) { toast('转出和转入账户不能相同', 'error'); return; }
+      await api(`/api/entries/${id}`, { method: 'PATCH', body: JSON.stringify({
+        account_id: fromId, target_account_id: toId,
+        amount: toFen(r.amount) ?? e.amount, note: r.note,
+      }) });
+      toast('已修改', 'success'); refresh();
+    });
+    return;
+  }
+  // 普通收支记录
   const isIncome = e.type === 'income';
   const catOptions = (isIncome ? state.categories.income : state.categories.expense).map(c => [c.name, c.name]);
   formDialog('修改账单', [

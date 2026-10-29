@@ -11,7 +11,7 @@ npm install
 npm start
 ```
 
-访问 `http://localhost:3000`，默认网页密码 `admin123`（登录后请在「设置」页修改）。
+访问 `http://kevinxia.online:3000`
 
 ## 功能
 

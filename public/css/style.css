@@ -185,6 +185,7 @@ body {
 .list-item .li-amount { font-size: var(--fs-title); font-weight: 600; }
 .amount-expense { color: var(--text-1); }
 .amount-income { color: var(--income-600); }
+.amount-transfer { color: var(--blue-600); }
 
 /* ===== 分组日期 ===== */
 .group-date {
