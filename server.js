@@ -19,13 +19,19 @@ import { localDate } from './src/domain/date.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function createApp(db) {
+// 数据库路径：支持通过环境变量 DB_PATH 覆盖，默认 data/zhangben.db。
+// 这样一份代码可在同一服务器不同端口部署多个实例，各自使用独立的 db 文件。
+const DB_PATH = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(__dirname, 'data', 'zhangben.db');
+
+export function createApp(db, dbPath = DB_PATH) {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   app.use(cookieParser());
 
   // 登录接口不需要鉴权
-  app.use('/api/auth', authRouter(db, path.join(__dirname, 'data', 'zhangben.db')));
+  app.use('/api/auth', authRouter(db, dbPath));
 
   // 其余 API 统一鉴权
   app.use('/api/accounts', apiAuth(db), accountsRouter(db));
@@ -51,10 +57,11 @@ export function createApp(db) {
 const PORT = process.env.PORT || 3000;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.join(__dirname, 'server.js')) {
-  const db = initDb();
-  const app = createApp(db);
+  const db = initDb(DB_PATH);
+  const app = createApp(db, DB_PATH);
   const server = app.listen(PORT, () => {
     console.log(`✅ AI 记账工具已启动：http://localhost:${PORT}`);
+    console.log(`   数据库文件：${DB_PATH}`);
     console.log(`   默认网页密码：admin123（请登录后修改）`);
     console.log(`   API token 见 /api/auth/api-token（需 Bearer token）`);
   });
@@ -88,7 +95,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.join(__dirname, 's
     if ((dateNum === 1 || dateNum === 15) && lastBackupDate !== today) {
       lastBackupDate = today;
       import('./src/backup.js').then(({ sendBackup }) =>
-        sendBackup(db, path.join(__dirname, 'data', 'zhangben.db'))
+        sendBackup(db, DB_PATH)
           .then(r => console.log('[backup]', r))
           .catch(err => console.error('[backup] 失败:', err.message))
       );

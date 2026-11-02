@@ -11,8 +11,6 @@ npm install
 npm start
 ```
 
-访问 `http://kevinxia.online:3000`
-
 ## 功能
 
 - **资产 / 负债 / 应收应付** 三类账户，主页可勾选展示哪些账户，自动汇总总资产、净资产。
