@@ -34,9 +34,46 @@ token找用户获取，或者从项目目录.env获取
 - `DELETE /api/accounts/:id` → 删除（现金账户不可删）
 - `GET /api/accounts/cash` → 现金账户
 
-### 记账分类
-- `GET /api/categories` → `{expense:[...], income:[...]}`，每项 `{type, name, icon, color, sort}`
+### 记账分类（账单类型）
+- `GET /api/categories` → `{expense:[...], income:[...]}`，每项 `{id, type, name, icon, color, sort}`
 - 记账前**必须先拉一次全量分类**，`POST /api/entries` 的 `category` 只能取自返回里的 `name`，不要自己编分类名；确实没有匹配项时，选最接近的（收入侧可用「其他」）。
+
+#### 分类（账单类型）管理接口
+分类是记账的「类型」，支出/收入各自一套，存 `categories` 表。所有接口都需 Bearer token。
+
+- **新增分类** `POST /api/categories`
+  ```json
+  {"type":"expense", "name":"宠物用品", "icon":"🐱", "color":"#26a69a"}
+  ```
+  - `type` 必填，只能 `expense` 或 `income`；`name` 必填且同类型内不可重名（重名返回 409）。
+  - `icon`（emoji）、`color`（hex）可选，默认 `🏷` / `#42a5f5`；`sort` 可选，默认排到该类型末尾。
+  - 返回新建的分类对象 `{id, type, name, icon, color, sort}`。
+
+- **修改分类** `PATCH /api/categories/:id`
+  ```json
+  {"name":"餐饮美食", "icon":"🍜", "color":"#f5a623", "sort":0}
+  ```
+  - 四个字段均可选，只传要改的；`id` 从 `GET /api/categories` 查得。
+  - **改名不会自动同步历史流水**：`entries.category` 存的是分类名字符串，改名后旧流水仍显示旧名。若要让历史一起变，需另跑一条 `UPDATE entries SET category=新名 WHERE category=旧名`（谨慎，先备份）。
+
+- **删除分类** `DELETE /api/categories/:id`
+  - 已被任何流水使用的分类**不可删**（返回 409，提示被多少条流水使用），避免历史记录失去分类语义；此时只能改名或保留。
+  - 未使用的分类直接删除，返回 `{ok:true}`。
+
+- **调用示例**（假设后端在 `http://host:3000`，token 见鉴权节）：
+  ```bash
+  # 列出全部分类
+  curl -H "Authorization: Bearer $TOKEN" http://host:3000/api/categories
+  # 新增一个支出分类
+  curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d '{"type":"expense","name":"宠物用品","icon":"🐱"}' http://host:3000/api/categories
+  # 改名 id=3 的分类
+  curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d '{"name":"餐饮美食"}' http://host:3000/api/categories/3
+  # 删除 id=9 的分类
+  curl -X DELETE -H "Authorization: Bearer $TOKEN" http://host:3000/api/categories/9
+  ```
+- **注意**：新增/改名后，`POST /api/entries` 的 `category` 必须用**新的 name**，且要重新 `GET /api/categories` 确认。多实例部署时每个实例 db 独立，分类互不影响，需分别管理。
 
 ### 平账（重点）
 - `POST /api/accounts/flatten` → 批量平账，body：
