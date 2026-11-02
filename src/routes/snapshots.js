@@ -1,5 +1,6 @@
 import express from 'express';
 import { listSnapshots, snapshotToday } from '../domain/snapshots.js';
+import { localDate } from '../domain/date.js';
 
 export function snapshotsRouter(db) {
   const r = express.Router();
@@ -13,7 +14,7 @@ export function snapshotsRouter(db) {
 
   // 手动触发一次今日快照（便于测试）
   r.post('/snapshot', (req, res) => {
-    const date = (req.body && req.body.date) || new Date().toISOString().slice(0, 10);
+    const date = (req.body && req.body.date) || localDate();
     res.json({ snapshot: snapshotToday(db, date) });
   });
 

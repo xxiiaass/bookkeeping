@@ -28,7 +28,15 @@ export function snapshotToday(db, date) {
   return { date, shownTotal, allTotal };
 }
 
-// 查询快照，按日期区间
+// 仅补齐缺失的快照（已存在则不动），用于启动时补当天
+export function ensureSnapshot(db, date) {
+  const row = db.prepare('SELECT * FROM asset_snapshots WHERE date = ?').get(date);
+  if (row) return { date, shownTotal: row.shown_total, allTotal: row.all_total, existed: true };
+  const r = snapshotToday(db, date);
+  return { ...r, existed: false };
+}
+
+// 查询快照，按日期区间（返回 camelCase，与前端字段一致）
 export function listSnapshots(db, { from, to, limit = 365 } = {}) {
   let sql = 'SELECT * FROM asset_snapshots';
   const params = [];
@@ -38,5 +46,11 @@ export function listSnapshots(db, { from, to, limit = 365 } = {}) {
   if (conds.length) sql += ' WHERE ' + conds.join(' AND ');
   sql += ' ORDER BY date DESC LIMIT ?';
   params.push(limit);
-  return db.prepare(sql).all(...params).reverse();
+  return db.prepare(sql).all(...params).reverse().map(r => ({
+    id: r.id,
+    date: r.date,
+    shownTotal: r.shown_total,
+    allTotal: r.all_total,
+    createdAt: r.created_at,
+  }));
 }

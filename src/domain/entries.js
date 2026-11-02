@@ -7,13 +7,23 @@ import { getAccount, getCashAccount } from './accounts.js';
 //   transfer：从 account_id 转出 amount，转入 target_account_id
 // balance()：记一条平账记录，金额 = -当前现金余额，使现金归零。
 
-export function listEntries(db, { month, limit = 500 } = {}) {
+export function listEntries(db, { month, limit = 500, category, type } = {}) {
   let sql = 'SELECT e.*, a.name as account_name, t.name as target_name FROM entries e LEFT JOIN accounts a ON a.id = e.account_id LEFT JOIN accounts t ON t.id = e.target_account_id';
   const params = [];
+  const conds = [];
   if (month) {
-    sql += ' WHERE e.date LIKE ?';
+    conds.push('e.date LIKE ?');
     params.push(month + '%'); // month 形如 '2026-10'
   }
+  if (category) {
+    conds.push('e.category = ?');
+    params.push(category);
+  }
+  if (type) {
+    conds.push('e.type = ?');
+    params.push(type);
+  }
+  if (conds.length) sql += ' WHERE ' + conds.join(' AND ');
   sql += ' ORDER BY e.date DESC, e.id DESC LIMIT ?';
   params.push(limit);
   return db.prepare(sql).all(...params);

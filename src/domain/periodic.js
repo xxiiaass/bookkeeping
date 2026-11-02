@@ -1,5 +1,6 @@
 import { getCashAccount } from './accounts.js';
 import { addEntry } from './entries.js';
+import { localDate } from './date.js';
 
 // 周期账：按 cron 规则到点自动记账
 // cron 支持两种简单形式：
@@ -84,7 +85,7 @@ export function runDue(db, now = new Date()) {
   const generated = [];
   for (const p of due) {
     const entry = addEntry(db, {
-      date: now.toISOString().slice(0, 10),
+      date: localDate(now),
       type: p.type,
       category: p.category,
       account_id: p.account_id,

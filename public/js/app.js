@@ -1,10 +1,17 @@
 // AI 记账前端 —— 照抄口袋记账的页面设计
+// 本地日期（不能用 toISOString，那是 UTC，东八区 0~8 点会算成前一天）
+const localDate = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 const state = {
   token: localStorage.getItem('zb_token') || '',
   tab: 'assets',          // assets | liabilities | entries | report | settings | trend
+  // 当前视图（支持浏览器/手势返回）：{name:'tab',tab} | {name:'account',id} | {name:'category',category,type}
+  view: { name: 'tab', tab: 'assets' },
+  report: null,            // 最近一次 report 数据（用于视图切换时复用，避免汇总卡闪现旧值）
   accounts: [],
   categories: { expense: [], income: [] },
-  month: new Date().toISOString().slice(0, 7),  // 账单/报表当前月份 YYYY-MM
+  month: localDate().slice(0, 7),  // 账单/报表当前月份 YYYY-MM
   reportType: 'expense',  // 报表页 收入/支出 切换
   detailStatus: 'open',    // 应收/应付详情页 未完成/已完成 切换
   hideAmount: false,       // 汇总金额是否隐藏（眼睛图标）
@@ -14,7 +21,7 @@ const state = {
   entryType: 'expense',
   entryCategory: '',
   entryAmount: '',
-  entryDate: new Date().toISOString().slice(0, 10),
+  entryDate: localDate(),
   entryNote: '',
 };
 
@@ -34,7 +41,7 @@ async function api(path, opts = {}) {
 }
 
 const fmt = (v) => ((v || 0) / 100).toFixed(2);
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 const toFen = (val) => { const n = parseFloat(val); return isNaN(n) ? null : Math.round(n * 100); };
 const KEYPAD = ['7','8','9','⌫','4','5','6','C','1','2','3','.','0','确定'];
 const keypadHtml = () => KEYPAD.map(k => {
@@ -58,19 +65,52 @@ function toast(msg, type) {
 function lockBody() { document.body.style.overflow = 'hidden'; }
 function unlockBody() { document.body.style.overflow = ''; }
 
+// ---------- 浏览器历史：返回键 / 右滑手势不再直接退出站点 ----------
+let modalDepth = 0;          // 已压入历史的弹窗数量
+let expectedPops = 0;        // UI 主动 history.back() 的次数（吞掉对应 popstate）
+let pendingConfirmResolve = null;
+
+function pushHistory(view) {
+  try { history.pushState({ view }, '', location.pathname + location.search); } catch {}
+}
+
+function pushModal() {
+  modalDepth++;
+  try { history.pushState({ modal: modalDepth, view: state.view }, '', location.pathname + location.search); } catch {}
+}
+
+function popModal() {
+  if (modalDepth <= 0) return;
+  modalDepth--;
+  expectedPops++;
+  history.back();
+}
+
+function forceCloseModals() {
+  ['#entry-modal', '#form-modal', '#confirm-modal', '#option-panel'].forEach(s => $(s)?.classList.add('hidden'));
+  if (pendingConfirmResolve) { const r = pendingConfirmResolve; pendingConfirmResolve = null; r(false); }
+  unlockBody();
+}
+
 function confirmDialog(text) {
   return new Promise((resolve) => {
     $('#confirm-text').textContent = text;
     $('#confirm-modal').classList.remove('hidden');
     lockBody();
-    const onOk = () => { cleanup(); resolve(true); };
-    const onCancel = () => { cleanup(); resolve(false); };
-    const cleanup = () => {
+    pushModal();
+    pendingConfirmResolve = resolve;
+    const finish = (val) => {
+      if (pendingConfirmResolve !== resolve) return; // 已被 forceClose 处理
+      pendingConfirmResolve = null;
       $('#confirm-modal').classList.add('hidden');
       unlockBody();
       $('#confirm-ok').removeEventListener('click', onOk);
       $('#confirm-cancel').removeEventListener('click', onCancel);
+      popModal();
+      resolve(val);
     };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
     $('#confirm-ok').addEventListener('click', onOk);
     $('#confirm-cancel').addEventListener('click', onCancel);
   });
@@ -78,7 +118,7 @@ function confirmDialog(text) {
 
 // fields: [{key,label,type,value,options,placeholder}]
 // type === 'select' 时：点击后弹出全屏大号选项面板（网格），options 为 [[value,label]] 或 [label]
-function formDialog(title, fields, onSubmit) {
+function formDialog(title, fields, onSubmit, opts = {}) {
   $('#form-modal-title').textContent = title;
   const body = $('#form-modal-body');
   body.innerHTML = fields.map(f => {
@@ -101,12 +141,52 @@ function formDialog(title, fields, onSubmit) {
     return `<div><div class="field-label">${f.label}</div><input class="field-input" type="${f.type || 'text'}" id="${id}" value="${f.value ?? ''}" placeholder="${f.placeholder || ''}"></div>`;
   }).join('');
   body.innerHTML += `<div class="form-actions"><button class="btn-ghost" id="form-cancel">取消</button><button class="btn-primary" id="form-ok">确定</button></div>`;
+  if (opts.extraAction) {
+    body.innerHTML += `<button class="btn-ghost" id="form-extra" style="width:100%;height:42px;margin-top:8px;border:none;border-radius:12px;font-size:14px;cursor:pointer">${opts.extraAction.label}</button>`;
+  }
+  if (opts.onDelete) {
+    body.innerHTML += `<button class="btn-ghost btn-danger" id="form-delete" style="width:100%;height:42px;margin-top:8px;border:none;border-radius:12px;font-size:14px;cursor:pointer">${opts.deleteLabel || '删除'}</button>`;
+  }
 
   $('#form-modal').classList.remove('hidden');
   lockBody();
-  const close = () => { $('#form-modal').classList.add('hidden'); unlockBody(); };
+  pushModal();
+  const close = () => {
+    $('#form-modal').classList.add('hidden');
+    $('#option-panel').classList.add('hidden');
+    unlockBody();
+    popModal();
+  };
   $('#form-cancel').addEventListener('click', close);
   $('#form-modal-close').addEventListener('click', close);
+
+  if (opts.extraAction) {
+    $('#form-extra').addEventListener('click', async () => {
+      try {
+        await opts.extraAction.onClick();
+        $('#form-modal').classList.add('hidden');
+        unlockBody();
+        popModal();
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast('操作失败，请重试', 'error');
+      }
+    });
+  }
+
+  if (opts.onDelete) {
+    $('#form-delete').addEventListener('click', async () => {
+      const ok = await confirmDialog(opts.deleteConfirm || '确定删除这条记录？删除后余额会自动回滚。');
+      if (!ok) return;
+      try {
+        await opts.onDelete();
+        $('#form-modal').classList.add('hidden');
+        unlockBody();
+        popModal();
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast('删除失败，请重试', 'error');
+      }
+    });
+  }
 
   // 自定义下拉：点击弹出全屏选项面板
   $$('.custom-select-trigger').forEach(trigger => {
@@ -162,17 +242,24 @@ function openOptionPanel(field, trigger) {
     <button class="op-option ${String(o.value) === String(curVal) ? 'selected' : ''}" data-value="${o.value}">${o.label}</button>
   `).join('');
   panel.classList.remove('hidden');
+  pushModal();
+
+  const closePanel = () => {
+    panel.classList.add('hidden');
+    popModal();
+  };
 
   panel.querySelectorAll('.op-option').forEach(btn => {
     btn.addEventListener('click', () => {
       // 更新 trigger 显示和 hidden 值
       trigger.querySelector('.custom-select-value').textContent = btn.textContent;
       $(`#${trigger.id}-hidden`).value = btn.dataset.value;
-      panel.classList.add('hidden');
+      closePanel();
       // 触发联动（如周期账类型切换分类）
       $(`#${trigger.id}-hidden`).dispatchEvent(new Event('change', { bubbles: true }));
     });
   });
+  panel._closePanel = closePanel;
 }
 
 // ---------- 登录 ----------
@@ -225,6 +312,7 @@ async function refresh() {
     await loadCategories();
     const [accRes, reportRes] = await Promise.all([api('/api/accounts'), api('/api/report')]);
     state.accounts = accRes.accounts;
+    state.report = reportRes;
     renderSummary(reportRes);
     renderTab();
   } catch (e) {
@@ -238,14 +326,16 @@ function renderSummary(report) {
   const card = $('#summary-card');
   const hide = state.hideAmount;
   const fmtAmt = (v) => hide ? '****' : '¥' + fmt(v);
-  if (state.tab === 'assets') {
+  // 只有顶层的资产/负债 tab 才显示汇总卡
+  const isTab = state.view.name === 'tab';
+  if (isTab && state.tab === 'assets') {
     card.classList.remove('hidden');
     card.innerHTML = `
       <div><div class="label" id="assets-filter-trigger">资产 <span class="arrow">▼</span></div><div class="amount">${fmtAmt(report.totalAsset)}</div><div class="sub">净资产 ${fmtAmt(report.netAsset)}</div></div>
       <div class="summary-right"><span class="eye" id="eye-toggle">${hide ? '🙈' : '👁'}</span></div>
     `;
     $('#assets-filter-trigger')?.addEventListener('click', () => showAccountFilter('asset'));
-  } else if (state.tab === 'liabilities') {
+  } else if (isTab && state.tab === 'liabilities') {
     card.classList.remove('hidden');
     card.innerHTML = `
       <div><div class="label" id="liab-filter-trigger">负债 <span class="arrow">▼</span></div><div class="amount">${fmtAmt(report.totalLiability)}</div></div>
@@ -303,21 +393,76 @@ function showAccountFilter(type) {
   });
 }
 
-function updateTopbar() {
-  const show = state.tab === 'assets' || state.tab === 'liabilities';
-  $('.topbar-left')?.classList.toggle('hidden', !show);
-  $('#go-report')?.classList.toggle('hidden', !show);
+function viewTitle(view) {
+  if (view.name === 'account') {
+    const a = state.accounts.find(x => x.id === view.id);
+    return a ? a.name : '账户';
+  }
+  if (view.name === 'category') return view.category;
+  if (view.name === 'receivable') return '应收明细';
+  if (view.name === 'payable') return '应付明细';
+  if (view.name === 'periodic') return '周期账';
+  return '';
 }
 
-async function renderTab() {
+function updateTopbar() {
+  const isTab = state.view.name === 'tab';
+  const tab = state.tab;
+  const isAssetTab = isTab && (tab === 'assets' || tab === 'liabilities');
+  // 非资产/负债的 tab 不显示顶栏（省空间）；子页面显示「返回 + 标题」
+  const hideTopbar = isTab && !isAssetTab;
+  $('#topbar')?.classList.toggle('hidden', hideTopbar);
+  $('#main-view')?.classList.toggle('no-topbar', hideTopbar);
+  $('#topbar-tabs')?.classList.toggle('hidden', !isAssetTab);
+  $('#topbar-sub')?.classList.toggle('hidden', isTab);
+  $('#go-report')?.classList.toggle('hidden', !isAssetTab);
+  // 趋势入口只在资产页显示
+  $('#go-trend')?.classList.toggle('hidden', !(isTab && tab === 'assets'));
+  if (!isTab) {
+    const el = $('#topbar-title');
+    if (el) el.textContent = viewTitle(state.view);
+  }
+}
+
+// 切换视图并压入历史（返回键/右滑手势可回退）
+function goView(view) {
+  state.view = view;
+  if (view.name === 'tab') state.tab = view.tab;
+  pushHistory(view);
+  renderView(view, { animate: true });
+  // 顶层 tab 顺带拉最新数据（静默刷新，不重复动画）
+  if (view.name === 'tab') refresh();
+}
+
+// 刷新当前视图（不压栈）
+function renderTab() { renderView(state.view, { animate: false }); }
+
+function animateContent(c) {
+  c.classList.remove('anim-in');
+  void c.offsetHeight; // 强制重排，重启动画
+  c.classList.add('anim-in');
+}
+
+function renderView(view, { animate = true } = {}) {
+  state.view = view;
+  if (view.name === 'tab') state.tab = view.tab;
   updateTopbar();
+  renderSummary(state.report || { totalAsset: 0, totalLiability: 0, netAsset: 0 });
   const c = $('#content');
-  if (state.tab === 'assets') return renderAssets(c);
-  if (state.tab === 'liabilities') return renderLiabilities(c);
-  if (state.tab === 'entries') return renderEntries(c);
-  if (state.tab === 'report') return renderReport(c);
-  if (state.tab === 'trend') return renderTrend(c);
-  if (state.tab === 'settings') return renderSettings(c);
+  if (animate) animateContent(c);
+
+  if (view.name === 'account') return renderAccountDetail(c, view.id);
+  if (view.name === 'category') return renderCategoryDetail(c, view.category, view.type);
+  if (view.name === 'receivable') return renderReceivableDetail(c, view.id);
+  if (view.name === 'payable') return renderPayableDetail(c, view.id);
+  if (view.name === 'periodic') return renderPeriodic(c);
+
+  if (view.tab === 'assets') return renderAssets(c);
+  if (view.tab === 'liabilities') return renderLiabilities(c);
+  if (view.tab === 'entries') return renderEntries(c);
+  if (view.tab === 'report') return renderReport(c);
+  if (view.tab === 'trend') return renderTrend(c);
+  if (view.tab === 'settings') return renderSettings(c);
 }
 
 // ---------- 资产页（含应收，照抄口袋记账） ----------
@@ -359,11 +504,11 @@ function renderAssets(c) {
 
   // 点击资产账户 → 进入账户详情（流水）
   $$('.account-card[data-id]').forEach(el => {
-    el.addEventListener('click', () => renderAccountDetail(c, Number(el.dataset.id)));
+    el.addEventListener('click', () => goView({ name: 'account', id: Number(el.dataset.id) }));
   });
   // 点击应收 → 进入应收明细页
   $$('.account-card[data-recv]').forEach(el => {
-    el.addEventListener('click', () => renderReceivableDetail(c, Number(el.dataset.recv)));
+    el.addEventListener('click', () => goView({ name: 'receivable', id: Number(el.dataset.recv) }));
   });
   $('#add-account-btn')?.addEventListener('click', () => addAccountDialog());
 }
@@ -414,10 +559,10 @@ function renderLiabilities(c) {
   c.innerHTML = html;
 
   $$('.account-card[data-id]').forEach(el => {
-    el.addEventListener('click', () => renderAccountDetail(c, Number(el.dataset.id)));
+    el.addEventListener('click', () => goView({ name: 'account', id: Number(el.dataset.id) }));
   });
   $$('.account-card[data-pay]').forEach(el => {
-    el.addEventListener('click', () => renderPayableDetail(c, Number(el.dataset.pay)));
+    el.addEventListener('click', () => goView({ name: 'payable', id: Number(el.dataset.pay) }));
   });
   $('#add-liab-btn')?.addEventListener('click', () => addAccountDialog('liability'));
 }
@@ -434,15 +579,13 @@ async function renderReceivableDetail(c, accountId) {
   for (const it of items) (groups[it.date || '未标注日期'] ||= []).push(it);
 
   let html = `
-    <div class="detail-header" style="background:#ff8a3d;color:#fff;border-radius:0 0 16px 16px;padding:16px;margin:-8px -12px 12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:16px;cursor:pointer" id="rcv-back">‹ 返回</span>
-        <span style="font-size:14px;cursor:pointer" id="rcv-status">${status === 'done' ? '已完成' : '未完成'} ▼</span>
-        <span style="font-size:14px;width:40px"></span>
+    <div class="detail-header" style="background:linear-gradient(135deg,#ff9a52,#f2792b)">
+      <div class="dh-bar" style="justify-content:flex-end">
+        <button class="dh-action" id="rcv-status">${status === 'done' ? '已完成' : '未完成'} ▾</button>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:14px">应收总额（${status === 'done' ? '已完成' : '未完成'}）</span>
-        <span style="font-size:28px;font-weight:700">¥${fmt(total)}</span>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+        <span class="dh-name">应收总额</span>
+        <span class="dh-value">¥${fmt(total)}</span>
       </div>
     </div>
   `;
@@ -465,28 +608,45 @@ async function renderReceivableDetail(c, accountId) {
   html += `<button class="add-record-btn" id="add-item-btn">＋ 添加记录</button>`;
   c.innerHTML = html;
 
-  $('#rcv-back').addEventListener('click', () => { state.tab = 'assets'; refresh(); });
   $('#rcv-status').addEventListener('click', () => {
     state.detailStatus = status === 'done' ? 'open' : 'done';
-    renderReceivableDetail(c, accountId);
+    renderView(state.view);
   });
   $$('.list-item[data-item]').forEach(el => {
-    el.addEventListener('click', async () => {
+    el.addEventListener('click', () => {
       const it = items.find(x => x.id == el.dataset.item);
-      try {
-        if (it.status === 'done') {
-          const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
-          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderReceivableDetail(c, accountId); }
-        } else {
-          const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
-          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderReceivableDetail(c, accountId); }
-        }
-      } catch (e) {
-        if (e.message !== 'unauthorized') toast('操作失败，请重试', 'error');
-      }
+      editReceivableItem(it, 'receivable');
     });
   });
   $('#add-item-btn').addEventListener('click', () => addItemDialog('receivable', accountId));
+}
+
+// 编辑应收/应付明细（含删除、标记结清）
+function editReceivableItem(it, kind) {
+  const isRecv = kind === 'receivable';
+  formDialog(isRecv ? '编辑应收' : '编辑应付', [
+    { key: 'name', label: isRecv ? '借给谁' : '向谁借', type: 'text', value: it.name },
+    { key: 'amount', label: '金额（元）', type: 'text', value: fmt(it.amount), required: true },
+    { key: 'date', label: '日期', type: 'date', value: it.date || today() },
+  ], async (r) => {
+    await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({
+      name: r.name, amount: toFen(r.amount) ?? it.amount, date: r.date,
+    }) });
+    toast('已保存', 'success'); refresh();
+  }, {
+    extraAction: {
+      label: it.status === 'open' ? '标记为已结清' : '恢复为未完成',
+      onClick: async () => {
+        await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: it.status === 'open' ? 'done' : 'open' }) });
+        toast(it.status === 'open' ? '已结清' : '已恢复', 'success'); refresh();
+      },
+    },
+    deleteConfirm: `确定删除「${it.name}」这条记录？删除后现金会自动回滚。`,
+    onDelete: async () => {
+      await api(`/api/receivables/${it.id}`, { method: 'DELETE' });
+      toast('已删除', 'success'); refresh();
+    },
+  });
 }
 
 // ---------- 应付明细页（粉色头，照抄） ----------
@@ -501,15 +661,13 @@ async function renderPayableDetail(c, accountId) {
   for (const it of items) (groups[it.date || '未标注日期'] ||= []).push(it);
 
   let html = `
-    <div class="detail-header" style="background:#ef6fa7;color:#fff;border-radius:0 0 16px 16px;padding:16px;margin:-8px -12px 12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:16px;cursor:pointer" id="pay-back">‹ 返回</span>
-        <span style="font-size:14px;cursor:pointer" id="pay-status">${status === 'done' ? '已完成' : '未完成'} ▼</span>
-        <span style="font-size:14px;width:40px"></span>
+    <div class="detail-header" style="background:linear-gradient(135deg,#f58cbb,#e4558f)">
+      <div class="dh-bar" style="justify-content:flex-end">
+        <button class="dh-action" id="pay-status">${status === 'done' ? '已完成' : '未完成'} ▾</button>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:14px">应付总额（${status === 'done' ? '已完成' : '未完成'}）</span>
-        <span style="font-size:28px;font-weight:700">¥${fmt(total)}</span>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+        <span class="dh-name">应付总额</span>
+        <span class="dh-value">¥${fmt(total)}</span>
       </div>
     </div>
   `;
@@ -532,25 +690,14 @@ async function renderPayableDetail(c, accountId) {
   html += `<button class="add-record-btn" id="add-item-btn">＋ 添加记录</button>`;
   c.innerHTML = html;
 
-  $('#pay-back').addEventListener('click', () => { state.tab = 'liabilities'; refresh(); });
   $('#pay-status').addEventListener('click', () => {
     state.detailStatus = status === 'done' ? 'open' : 'done';
-    renderPayableDetail(c, accountId);
+    renderView(state.view);
   });
   $$('.list-item[data-item]').forEach(el => {
-    el.addEventListener('click', async () => {
+    el.addEventListener('click', () => {
       const it = items.find(x => x.id == el.dataset.item);
-      try {
-        if (it.status === 'done') {
-          const ok = await confirmDialog(`是否将「${it.name}」恢复为未完成？`);
-          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) }); renderPayableDetail(c, accountId); }
-        } else {
-          const ok = await confirmDialog(`是否标记「${it.name}」为已结清？`);
-          if (ok) { await api(`/api/receivables/${it.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); renderPayableDetail(c, accountId); }
-        }
-      } catch (e) {
-        if (e.message !== 'unauthorized') toast('操作失败，请重试', 'error');
-      }
+      editReceivableItem(it, 'payable');
     });
   });
   $('#add-item-btn').addEventListener('click', () => addItemDialog('payable', accountId));
@@ -642,16 +789,14 @@ async function renderAccountDetail(c, accountId) {
   const balanceLabel = isLiability ? '已用额度' : '余额';
 
   let html = `
-    <div class="detail-header" style="background:${headerColor};color:#fff;border-radius:0 0 16px 16px;padding:16px;margin:-8px -12px 12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:16px;cursor:pointer" id="acc-back">‹ 返回</span>
-        <span style="font-size:14px;cursor:pointer" id="acc-edit">编辑</span>
-        <span style="font-size:14px;width:40px"></span>
+    <div class="detail-header" style="background:${headerColor}">
+      <div class="dh-bar" style="justify-content:flex-end">
+        <button class="dh-action" id="acc-edit">编辑</button>
       </div>
-      <div style="text-align:center;margin-bottom:8px;">
-        <div style="font-size:14px;opacity:.9">${a.name}</div>
-        <div style="font-size:28px;font-weight:700">¥${fmt(a.balance)}</div>
-        <div style="font-size:12px;opacity:.8">${balanceLabel}${a.credit_limit ? ' · 总额度 ¥' + fmt(a.credit_limit) + ' · 可用 ¥' + fmt(a.credit_limit - a.balance) : ''}</div>
+      <div style="text-align:center;">
+        <div class="dh-name">${a.name}</div>
+        <div class="dh-value">¥${fmt(a.balance)}</div>
+        <div class="dh-sub">${balanceLabel}${a.credit_limit ? ' · 总额度 ¥' + fmt(a.credit_limit) + ' · 可用 ¥' + fmt(a.credit_limit - a.balance) : ''}</div>
       </div>
     </div>
   `;
@@ -698,10 +843,6 @@ async function renderAccountDetail(c, accountId) {
   }
   c.innerHTML = html;
 
-  $('#acc-back').addEventListener('click', () => {
-    state.tab = isLiability ? 'liabilities' : 'assets';
-    refresh();
-  });
   $('#acc-edit').addEventListener('click', () => editAccount(accountId));
   $$('.list-item[data-id]').forEach(el => {
     el.addEventListener('click', () => {
@@ -751,14 +892,14 @@ async function renderReport(c) {
     </div>
     <div class="report-chart-wrap">
       <div class="report-donut">
-        <svg width="180" height="180" viewBox="0 0 180 180">
+        <svg width="148" height="148" viewBox="0 0 180 180">
           ${total === 0 ? `<circle cx="90" cy="90" r="70" fill="#eee"></circle>` : segs}
-          <circle cx="90" cy="90" r="40" fill="#fff"></circle>
+          <circle cx="90" cy="90" r="44" fill="#fff"></circle>
         </svg>
-        <div class="report-center">
-          <div class="rc-label">${rtLabel}</div>
-          <div class="rc-amount">¥${fmt(total)}</div>
-        </div>
+      </div>
+      <div class="report-total">
+        <span class="rt-label">${rtLabel}</span>
+        <span class="rt-amount">¥${fmt(total)}</span>
       </div>
     </div>
   `;
@@ -766,13 +907,13 @@ async function renderReport(c) {
   for (const it of list) {
     const ci = catInfo(rt, it.name);
     html += `
-      <div class="cat-stat">
+      <div class="cat-stat" data-cat="${it.name}">
         <div class="li-icon" style="--ic:${ci.color}">${ci.icon}</div>
         <div style="flex:1;margin:0 8px">
-          <div style="display:flex;justify-content:space-between;font-size:14px">
-            <span>${it.name}</span><span>${(it.pct * 100).toFixed(1)}%</span>
+          <div style="display:flex;justify-content:space-between;font-size:13px">
+            <span>${it.name}</span><span style="color:var(--text-3)">${(it.pct * 100).toFixed(1)}%</span>
           </div>
-          <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${(it.pct * 100).toFixed(1)}%;background:${ci.color}"></div></div>
+          <div class="bar-track" style="margin-top:4px"><div class="bar-fill" style="width:${(it.pct * 100).toFixed(1)}%;background:${ci.color}"></div></div>
         </div>
         <div class="cat-stat-amount">${fmt(it.amount)}</div>
       </div>
@@ -787,6 +928,65 @@ async function renderReport(c) {
     state.reportType = el.dataset.rt;
     renderTab();
   }));
+  // 点击分类 → 查看该分类下的具体账目
+  $$('.cat-stat[data-cat]').forEach(el => {
+    el.addEventListener('click', () => goView({ name: 'category', category: el.dataset.cat, type: rt }));
+  });
+}
+
+// ---------- 分类明细页（从报表点分类进入） ----------
+async function renderCategoryDetail(c, category, type) {
+  const res = await api(`/api/entries?month=${state.month}&category=${encodeURIComponent(category)}&type=${type}&limit=1000`);
+  const entries = res.entries || [];
+  const total = entries.reduce((s, e) => s + e.amount, 0);
+  const ci = catInfo(type, category);
+  const isIncome = type === 'income';
+  const color = ci.color || '#5c6bc0';
+
+  let html = `
+    <div class="detail-header" style="background:${color}">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:19px">${ci.icon}</div>
+        <div style="flex:1">
+          <div class="dh-name">${category}</div>
+          <div class="dh-value">¥${fmt(total)}</div>
+        </div>
+        <div style="text-align:right;font-size:11px;opacity:.85">${entries.length} 笔<br>${state.month.replace('-', '年')}月</div>
+      </div>
+    </div>
+  `;
+
+  const groups = {};
+  for (const e of entries) (groups[e.date] ||= []).push(e);
+
+  if (entries.length === 0) {
+    html += `<div class="empty-state"><div class="empty-emoji">🗒️</div><div class="empty-title">本月该分类暂无账目</div></div>`;
+  }
+  for (const date of Object.keys(groups).sort().reverse()) {
+    const day = date.slice(8, 10);
+    const daySum = groups[date].reduce((s, e) => s + e.amount, 0);
+    html += `<div class="group-date"><span class="gdot">${day}日</span><span>¥${fmt(daySum)}</span></div>`;
+    for (const e of groups[date]) {
+      html += `
+        <div class="list-item" data-id="${e.id}">
+          <div class="li-left">
+            <div class="li-icon" style="--ic:${color}">${ci.icon}</div>
+            <div><div class="li-name">${e.note || category}${e.is_balance ? ' ⚖️' : ''}</div><div class="li-sub">${e.account_name || '现金'} · 点击修改</div></div>
+          </div>
+          <div class="li-amount ${isIncome ? 'amount-income' : 'amount-expense'}">${isIncome ? '+' : '-'}${fmt(e.amount)}</div>
+        </div>
+      `;
+    }
+  }
+  c.innerHTML = html;
+
+  $('#cd-back')?.addEventListener('click', () => history.back());
+  $$('.list-item[data-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const e = entries.find(x => x.id == el.dataset.id);
+      editEntry(Number(el.dataset.id), e);
+    });
+  });
 }
 
 // ---------- 资产趋势页（折线图） ----------
@@ -794,7 +994,7 @@ async function renderTrend(c) {
   const to = today();
   const d = new Date();
   d.setDate(d.getDate() - state.trendRange);
-  const from = d.toISOString().slice(0, 10);
+  const from = localDate(d);
   const res = await api(`/api/snapshots?from=${from}&to=${to}`);
   const snaps = res.snapshots || [];
   const key = state.trendScope === 'all' ? 'allTotal' : 'shownTotal';
@@ -823,32 +1023,48 @@ async function renderTrend(c) {
   const values = snaps.map(s => s[key]);
   const minV = Math.min(...values);
   const maxV = Math.max(...values);
-  const span = maxV - minV || 1;
-  const W = 340, H = 200, P = 30;
-  const stepX = snaps.length > 1 ? (W - 2 * P) / (snaps.length - 1) : 0;
+  // 数值几乎不变时给一个可视区间，避免全平线 + Y 轴标签重复
+  const rawSpan = maxV - minV;
+  const span = rawSpan > 0 ? rawSpan : Math.max(Math.abs(maxV) * 0.02, 10000);
+  const lo = rawSpan > 0 ? minV : minV - span / 2;
+  const hi = rawSpan > 0 ? maxV : maxV + span / 2;
+
+  const W = 340, H = 200;
+  const PL = 12, PR = 58, PT = 14, PB = 24;   // 左/右/上/下内边距（右侧留给 Y 轴文字）
+  const plotW = W - PL - PR;
+  const plotH = H - PT - PB;
+  const stepX = snaps.length > 1 ? plotW / (snaps.length - 1) : 0;
+  const yOf = (v) => PT + (1 - (v - lo) / (hi - lo)) * plotH;
   const points = snaps.map((s, i) => {
-    const x = P + i * stepX;
-    const y = H - P - ((s[key] - minV) / span) * (H - 2 * P);
-    return [x, y, s];
+    const x = PL + i * stepX;
+    return [x, yOf(s[key]), s];
   });
 
   // 折线 + 面积
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
-  const areaPath = `${linePath} L ${points[points.length - 1][0].toFixed(1)} ${H - P} L ${points[0][0].toFixed(1)} ${H - P} Z`;
+  const baseline = PT + plotH;
+  const areaPath = `${linePath} L ${points[points.length - 1][0].toFixed(1)} ${baseline} L ${points[0][0].toFixed(1)} ${baseline} Z`;
 
-  // 网格 + Y 轴标签
+  // 金额简写：≥1 万显示 x.x万，否则显示整数
+  const shortMoney = (v) => {
+    const yuan = v / 100;
+    if (Math.abs(yuan) >= 10000) return (yuan / 10000).toFixed(1) + '万';
+    return Math.round(yuan).toString();
+  };
+
+  // 网格 + Y 轴标签（标签右对齐在图表右侧预留区内）
   const gridLines = [];
   for (let i = 0; i <= 4; i++) {
-    const y = P + (i * (H - 2 * P) / 4);
-    const v = maxV - (i * span / 4);
-    gridLines.push(`<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="#f0f0f0" stroke-width="1"></line>`);
-    gridLines.push(`<text x="${W - P + 4}" y="${y + 4}" font-size="10" fill="#999">¥${(v / 100 / 10000).toFixed(1)}万</text>`);
+    const v = hi - (i * (hi - lo) / 4);
+    const y = yOf(v);
+    gridLines.push(`<line x1="${PL}" y1="${y.toFixed(1)}" x2="${W - PR}" y2="${y.toFixed(1)}" stroke="#f0f0f0" stroke-width="1"></line>`);
+    gridLines.push(`<text x="${W - PR + 6}" y="${(y + 3.5).toFixed(1)}" font-size="9.5" fill="#a0a4ab">¥${shortMoney(v)}</text>`);
   }
 
   // X 轴标签（首尾）
   const xLabels = `
-    <text x="${P}" y="${H - 8}" font-size="10" fill="#999">${snaps[0].date.slice(5)}</text>
-    <text x="${W - P}" y="${H - 8}" font-size="10" fill="#999" text-anchor="end">${snaps[snaps.length - 1].date.slice(5)}</text>
+    <text x="${PL}" y="${H - 7}" font-size="9.5" fill="#a0a4ab">${snaps[0].date.slice(5)}</text>
+    <text x="${W - PR}" y="${H - 7}" font-size="9.5" fill="#a0a4ab" text-anchor="end">${snaps[snaps.length - 1].date.slice(5)}</text>
   `;
 
   // 数据点（少时显示）
@@ -987,8 +1203,8 @@ async function renderSettings(c) {
     }
   });
   $('#token-box').addEventListener('click', () => { navigator.clipboard.writeText(state.token); toast('Token 已复制', 'success'); });
-  $('#periodic-manage-btn').addEventListener('click', () => renderPeriodic(c));
-  $('#go-trend-btn').addEventListener('click', () => { state.tab = 'trend'; refresh(); });
+  $('#periodic-manage-btn').addEventListener('click', () => goView({ name: 'periodic' }));
+  $('#go-trend-btn').addEventListener('click', () => { setNavActive(''); goView({ name: 'tab', tab: 'trend' }); });
 }
 
 // ---------- 周期账管理（独立视图） ----------
@@ -1012,7 +1228,7 @@ async function renderPeriodic(c) {
   c.innerHTML = html;
 
   $('#add-periodic-btn').addEventListener('click', () => addPeriodicDialog());
-  $('#back-settings-btn').addEventListener('click', () => renderTab());
+  $('#back-settings-btn').addEventListener('click', () => history.back());
   $$('.list-item[data-p]').forEach(el => {
     el.addEventListener('click', async () => {
       const p = list.find(x => x.id == el.dataset.p);
@@ -1030,41 +1246,59 @@ function cronDesc(cron) {
 // ---------- 录入弹层 ----------
 function openEntryModal() {
   state.entryType = 'expense'; state.entryCategory = ''; state.entryAmount = ''; state.entryNote = '';
+  const wasHidden = $('#entry-modal').classList.contains('hidden');
   $('#entry-modal').classList.remove('hidden');
   lockBody();
+  if (wasHidden) pushModal();
   renderEntryModal();
 }
-function closeEntryModal() { $('#entry-modal').classList.add('hidden'); unlockBody(); }
+function closeEntryModal() {
+  const wasHidden = $('#entry-modal').classList.contains('hidden');
+  $('#entry-modal').classList.add('hidden');
+  unlockBody();
+  if (!wasHidden) popModal();
+}
 
 function renderEntryModal() {
   const body = $('#entry-body');
   const isTransfer = state.entryType === 'transfer';
   const cats = state.entryType === 'income' ? state.categories.income : state.categories.expense;
+  const catGrid = cats.map(cat => `
+      <div class="cat-item ${state.entryCategory === cat.name ? 'selected' : ''}" data-cat="${cat.name}">
+        <div class="cat-icon" style="background:${cat.color}">${cat.icon}</div>
+        <div class="cat-name">${cat.name}</div>
+      </div>`).join('');
   body.innerHTML = `
-    <div class="amount-display">¥ ${state.entryAmount || '0.00'}</div>
+    <div class="amount-display" id="entry-amount-display">¥ ${state.entryAmount || '0.00'}</div>
     ${isTransfer ? transferForm() : `
-      <div class="cat-grid">
-        ${cats.map(cat => `
-          <div class="cat-item ${state.entryCategory === cat.name ? 'selected' : ''}" data-cat="${cat.name}">
-            <div class="cat-icon" style="background:${cat.color}">${cat.icon}</div>
-            <div class="cat-name">${cat.name}</div>
-          </div>`).join('')}
+      <div class="entry-scroll">
+        <div class="cat-grid">${catGrid}</div>
+        <div class="entry-fields">
+          <div class="form-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <span style="font-size:13px;color:#999">日期</span>
+            <input type="date" id="entry-date" value="${state.entryDate}" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
+          </div>
+          <div class="form-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <span style="font-size:13px;color:#999">备注</span>
+            <input type="text" id="entry-note" value="${state.entryNote}" placeholder="可选" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
+          </div>
+        </div>
       </div>
-      <div class="form-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <span style="font-size:13px;color:#999">日期</span>
-        <input type="date" id="entry-date" value="${state.entryDate}" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
-      </div>
-      <div class="form-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <span style="font-size:13px;color:#999">备注</span>
-        <input type="text" id="entry-note" value="${state.entryNote}" placeholder="可选" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
-      </div>
-      <div class="keypad">
-        ${keypadHtml()}
-      </div>
+      <div class="keypad">${keypadHtml()}</div>
     `}
   `;
+  bindEntryInputs();
+}
 
-  $$('.cat-item').forEach(el => el.addEventListener('click', () => { state.entryCategory = el.dataset.cat; renderEntryModal(); }));
+// 绑定录入弹层内的交互：分类点选、日期/备注实时同步、键盘
+function bindEntryInputs() {
+  $$('.cat-item').forEach(el => el.addEventListener('click', () => {
+    state.entryCategory = el.dataset.cat;
+    $$('.cat-item').forEach(c => c.classList.toggle('selected', c.dataset.cat === state.entryCategory));
+  }));
+  const dateEl = $('#entry-date'), noteEl = $('#entry-note');
+  if (dateEl) dateEl.addEventListener('input', () => { state.entryDate = dateEl.value; });
+  if (noteEl) noteEl.addEventListener('input', () => { state.entryNote = noteEl.value; });
   $$('.key').forEach(el => el.addEventListener('click', () => handleKey(el.dataset.key)));
 }
 
@@ -1076,25 +1310,25 @@ function transferForm() {
   const toCandidates = accs.filter(a => a.id !== fromDefault);
   const toDefault = toCandidates.length > 0 ? toCandidates[0].id : '';
   return `
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <span style="font-size:13px;color:#999;width:40px">转出</span>
-      <select id="tr-from" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}" ${a.id === fromDefault ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
+    <div class="entry-scroll">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;color:#999;width:40px">转出</span>
+        <select id="tr-from" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}" ${a.id === fromDefault ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;color:#999;width:40px">转入</span>
+        <select id="tr-to" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}" ${a.id === toDefault ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;color:#999;width:40px">日期</span>
+        <input type="date" id="entry-date" value="${state.entryDate}" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;color:#999;width:40px">备注</span>
+        <input type="text" id="entry-note" value="${state.entryNote}" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
+      </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <span style="font-size:13px;color:#999;width:40px">转入</span>
-      <select id="tr-to" class="field-select" style="flex:1">${accs.map(a => `<option value="${a.id}" ${a.id === toDefault ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <span style="font-size:13px;color:#999;width:40px">日期</span>
-      <input type="date" id="entry-date" value="${state.entryDate}" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <span style="font-size:13px;color:#999;width:40px">备注</span>
-      <input type="text" id="entry-note" value="${state.entryNote}" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px">
-    </div>
-    <div class="keypad">
-      ${keypadHtml()}
-    </div>
+    <div class="keypad">${keypadHtml()}</div>
   `;
 }
 
@@ -1104,7 +1338,9 @@ function handleKey(k) {
   else if (k === 'C') state.entryAmount = '';
   else if (k === '.') { if (!state.entryAmount.includes('.')) state.entryAmount += state.entryAmount ? '.' : '0.'; }
   else state.entryAmount += k;
-  renderEntryModal();
+  // 只更新金额显示，不重建表单，避免日期/备注被重置
+  const disp = $('#entry-amount-display');
+  if (disp) disp.textContent = `¥ ${state.entryAmount || '0.00'}`;
 }
 
 async function submitEntry() {
@@ -1177,6 +1413,13 @@ function editAccount(id) {
 
 function editEntry(id, e) {
   if (!e) return;
+  const deleteOpts = {
+    deleteConfirm: '确定删除这条记录？删除后相关账户余额会自动回滚。',
+    onDelete: async () => {
+      await api(`/api/entries/${id}`, { method: 'DELETE' });
+      toast('已删除', 'success'); refresh();
+    },
+  };
   // 转账记录：显示转账编辑表单
   if (e.type === 'transfer') {
     const accs = state.accounts.filter(a => a.type === 'asset' || a.type === 'liability');
@@ -1194,7 +1437,7 @@ function editEntry(id, e) {
         amount: toFen(r.amount) ?? e.amount, note: r.note,
       }) });
       toast('已修改', 'success'); refresh();
-    });
+    }, deleteOpts);
     return;
   }
   // 普通收支记录
@@ -1207,7 +1450,7 @@ function editEntry(id, e) {
   ], async (r) => {
     await api(`/api/entries/${id}`, { method: 'PATCH', body: JSON.stringify({ category: r.category, amount: toFen(r.amount) ?? e.amount, note: r.note }) });
     toast('已修改', 'success'); refresh();
-  });
+  }, deleteOpts);
 }
 
 function addItemDialog(type, accountId) {
@@ -1255,19 +1498,21 @@ function bindEvents() {
   $('#login-btn').addEventListener('click', doLogin);
   $('#login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 
+  // 顶栏返回（子页面）
+  $('#topbar-back').addEventListener('click', () => history.back());
+
   // 顶栏 tab（资产/负债）
   $$('.tab').forEach(el => {
     el.addEventListener('click', () => {
-      state.tab = el.dataset.tab;
       $$('.tab').forEach(t => t.classList.toggle('active', t === el));
-      setNavActive(state.tab);
-      refresh();
+      setNavActive(el.dataset.tab);
+      goView({ name: 'tab', tab: el.dataset.tab });
     });
   });
 
-  // 右上趋势图标 → 报表
-  $('#go-report').addEventListener('click', () => { state.tab = 'report'; setNavActive('report'); refresh(); });
-  $('#go-trend').addEventListener('click', () => { state.tab = 'trend'; setNavActive(''); refresh(); });
+  // 右上图标：报表 / 资产趋势
+  $('#go-report').addEventListener('click', () => { setNavActive('report'); goView({ name: 'tab', tab: 'report' }); });
+  $('#go-trend').addEventListener('click', () => { setNavActive(''); goView({ name: 'tab', tab: 'trend' }); });
 
   // 底部导航
   $$('.nav-btn').forEach(el => {
@@ -1275,10 +1520,16 @@ function bindEvents() {
       const nav = el.dataset.nav;
       if (nav === 'add') return openEntryModal();
       const map = { assets: 'assets', report: 'report', entries: 'entries', settings: 'settings' };
-      state.tab = map[nav] || 'assets';
-      $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
+      const tab = map[nav] || 'assets';
+      $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
       setNavActive(nav);
-      refresh();
+      // 点当前 tab 时回顶并重新拉数据，不压栈
+      if (state.view.name === 'tab' && state.view.tab === tab) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        refresh();
+        return;
+      }
+      goView({ name: 'tab', tab });
     });
   });
 
@@ -1294,7 +1545,11 @@ function bindEvents() {
   });
 
   // 选项面板关闭
-  $('#op-panel-close').addEventListener('click', () => $('#option-panel').classList.add('hidden'));
+  $('#op-panel-close').addEventListener('click', () => {
+    const panel = $('#option-panel');
+    if (panel._closePanel) panel._closePanel();
+    else panel.classList.add('hidden');
+  });
 }
 
 function setNavActive(nav) {
@@ -1309,11 +1564,47 @@ function setNavActive(nav) {
 // ---------- 启动 ----------
 async function init() {
   bindEvents();
+
+  // 初始视图入栈（replace + 再 push 一条同视图记录），
+  // 保证第一次右滑/返回不会直接退出站点
+  try {
+    const url = location.pathname + location.search;
+    history.replaceState({ view: state.view }, '', url);
+    history.pushState({ view: state.view }, '', url);
+  } catch {}
+
+  // 返回键 / 右滑手势：优先关弹窗，其次回退视图，不会直接退出站点
+  window.addEventListener('popstate', (ev) => {
+    if (expectedPops > 0) { expectedPops--; return; }
+    if (modalDepth > 0) {
+      modalDepth--;
+      forceCloseModals();
+      return;
+    }
+    const v = (ev.state && ev.state.view) || { name: 'tab', tab: 'assets' };
+    renderView(v);
+    syncNavTo(v);
+  });
+
+  // 顶栏滚动时加深分隔线
+  window.addEventListener('scroll', () => {
+    $('.topbar')?.classList.toggle('scrolled', window.scrollY > 4);
+  }, { passive: true });
+
   if (state.token) {
     try { showMain(); await refresh(); return; } catch {}
   }
   // 必须手动登录，不自动登录
   showLogin();
+}
+
+// 让底部导航与当前视图保持一致
+function syncNavTo(view) {
+  if (view.name !== 'tab') return null;
+  const map = { assets: 'assets', liabilities: 'assets', report: 'report', entries: 'entries', settings: 'settings', trend: '' };
+  setNavActive(map[view.tab] ?? '');
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === view.tab));
+  return null;
 }
 
 init();

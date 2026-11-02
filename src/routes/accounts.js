@@ -4,6 +4,7 @@ import {
   deleteAccount, flatten, getCashAccount,
 } from '../domain/accounts.js';
 import { listEntries } from '../domain/entries.js';
+import { localDate } from '../domain/date.js';
 
 export function accountsRouter(db) {
   const r = express.Router();
@@ -42,7 +43,7 @@ export function accountsRouter(db) {
   // 批量平账：POST { date, balances: { accountId: actualBalance, ... } }
   r.post('/flatten', (req, res) => {
     const { date, balances } = req.body || {};
-    const results = flatten(db, balances || {}, date || new Date().toISOString().slice(0, 10));
+    const results = flatten(db, balances || {}, date || localDate());
     res.json({ ok: true, results, cash: getCashAccount(db) });
   });
 

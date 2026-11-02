@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拼多多账目核对报告 · 2026-10-30</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#ffffff; --ink:#1f2329; --muted:#6b7280; --line:#e5e7eb;
+          --red:#d93025; --green:#137333; --amber:#b45309; --blue:#1a56db; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--ink); font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; padding:32px 16px; }
+  .wrap { max-width:960px; margin:0 auto; }
+  h1 { font-size:22px; margin-bottom:4px; }
+  .sub { color:var(--muted); margin-bottom:24px; font-size:13px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .card .label { color:var(--muted); font-size:12px; }
+  .card .num { font-size:24px; font-weight:700; margin-top:4px; }
+  .num.bad { color:var(--red); }
+  .num.good { color:var(--green); }
+  h2 { font-size:16px; margin:28px 0 12px; padding-left:10px; border-left:4px solid var(--blue); }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; font-size:13px; }
+  th,td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { background:#f3f4f6; font-weight:600; white-space:nowrap; }
+  tr:last-child td { border-bottom:none; }
+  td.r, th.r { text-align:right; font-variant-numeric:tabular-nums; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; white-space:nowrap; }
+  .tag.ok   { background:#e6f4ea; color:var(--green); }
+  .tag.bad  { background:#fce8e6; color:var(--red); }
+  .tag.warn { background:#fef7e0; color:var(--amber); }
+  .note { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:10px; padding:14px 16px; margin:12px 0; font-size:13px; }
+  .note b { color:var(--amber); }
+  ul { margin:8px 0 8px 20px; }
+  li { margin:4px 0; }
+  .footer { color:var(--muted); font-size:12px; margin-top:32px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>拼多多账目核对报告</h1>
+  <div class="sub">核对时间：2026-10-30 01:18 · 数据来源：3 张订单列表截图（共 62 笔完整可见订单）vs 记账账本 2026-10 流水</div>
+
+  <div class="note" style="border-left-color:var(--green)">
+    <b style="color:var(--green)">已于 2026-10-30 01:37 修正到账本</b>
+    <ul>
+      <li>流水 155 小额净额：¥90.35 → <b>¥810.49</b></li>
+      <li>流水 146 水族灯 L-40：¥0 → <b>¥116.00</b>（退货中，退款到账后冲销）</li>
+      <li>流水 158 平账（清零）记录：¥7,000.00 → <b>¥6,163.86</b>（下调 ¥836.14）</li>
+      <li>现金余额保持 <b>¥529.46</b> 不变 · 10 月拼多多合计由 ¥425.35 修正为 <b>¥1,261.49</b></li>
+    </ul>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">截图实付总额</div><div class="num">¥1,505.08</div><div class="label">62 笔可见订单</div></div>
+    <div class="card"><div class="label">已退款成功</div><div class="num" style="color:var(--green)">−¥243.59</div><div class="label">5 笔</div></div>
+    <div class="card"><div class="label">实际应记净额</div><div class="num">¥1,261.49</div><div class="label">另有一笔 ¥116 退货中</div></div>
+    <div class="card"><div class="label">账本已记</div><div class="num">¥425.35</div><div class="label">4 笔</div></div>
+    <div class="card"><div class="label">差额（少记）</div><div class="num bad">¥836.14</div><div class="label">你的感觉是对的</div></div>
+  </div>
+
+  <h2>一、结论</h2>
+  <div class="note">
+    <b>10 月拼多多账确实记少了约 ¥836。</b> 按你的记账规则（100 元以上单独记、100 元以下按平台合并一条并扣除退款），10 月拼多多应记：
+    <ul>
+      <li>小额订单净额：<b>¥810.49</b>（小额实付 927.08 − 小额退款 116.59）</li>
+      <li>儿童滑梯秋千 ¥208（已单独记，正确）</li>
+      <li>匹克跑鞋 ¥127（已单独记，正确；同款第 2 单 ¥127 已退款，不计）</li>
+      <li>水族灯 ¥116：状态是「<b>待用户寄回退货商品</b>」，退款<b>尚未到账</b>，目前仍是实际支出，应记 ¥116（而不是 0）</li>
+    </ul>
+    合计 <b>¥1,261.49</b>，账本只记了 <b>¥425.35</b>，少记 <b>¥836.14</b>。
+  </div>
+
+  <h2>二、账本侧现有拼多多记录（2026-10）</h2>
+  <table>
+    <tr><th>流水ID</th><th>日期</th><th>分类</th><th class="r">金额</th><th>备注</th><th>核对结果</th></tr>
+    <tr><td>152</td><td>10-26</td><td>小孩</td><td class="r">¥208.00</td><td>拼多多-儿童滑梯秋千组合</td><td><span class="tag ok">正确</span></td></tr>
+    <tr><td>149</td><td>10-25</td><td>衣服鞋包</td><td class="r">¥127.00</td><td>拼多多-匹克态极跑鞋</td><td><span class="tag ok">正确</span>（同款第2单已退，不计）</td></tr>
+    <tr><td>146</td><td>10-20</td><td>娱乐</td><td class="r">¥0.00</td><td>拼多多-水族灯L-40</td><td><span class="tag warn">存疑</span> 退款未到账，暂应记 ¥116</td></tr>
+    <tr><td>155</td><td>10-31</td><td>生活用品</td><td class="r">¥90.35</td><td>拼多多小额净额（备注"已扣退款431.06"）</td><td><span class="tag bad">错误</span> 应为 ¥810.49，少 ¥720.14</td></tr>
+  </table>
+  <div class="note">
+    <b>疑点：</b>流水 155 备注里的「已扣退款 431.06」与截图可见的退款金额对不上——已退款成功合计 ¥243.59（含退货中则 ¥359.59），差 ¥71.47 无法解释，可能把退款口径算重了，或包含了截图范围之外的订单退款。
+  </div>
+
+  <h2>三、退款订单核对（5 笔已退款 + 1 笔退货中）</h2>
+  <table>
+    <tr><th>店铺</th><th>商品</th><th class="r">实付</th><th>状态</th><th>账本处理</th></tr>
+    <tr><td>津禾运动鞋服</td><td>匹克跑鞋（第2单）</td><td class="r">¥127.00</td><td>退款成功</td><td>合理：未计入</td></tr>
+    <tr><td>深圳长丰胶粘</td><td>床头柜置物架</td><td class="r">¥24.80</td><td>退款成功</td><td>已在小额净额中扣除</td></tr>
+    <tr><td>跃屘家居生活</td><td>亚麻拖鞋白色</td><td class="r">¥56.90</td><td>退款成功</td><td>已在小额净额中扣除</td></tr>
+    <tr><td>金泰恒数码</td><td>无线投屏器</td><td class="r">¥27.99</td><td>退款成功</td><td>已在小额净额中扣除</td></tr>
+    <tr><td>一二三四水草</td><td>爬地矮珍珠 2杯</td><td class="r">¥6.90</td><td>退款成功</td><td>已在小额净额中扣除</td></tr>
+    <tr><td>快乐鱼水族店</td><td>智能鱼缸灯 L-40</td><td class="r">¥116.00</td><td>退货中（待寄回）</td><td><span class="tag warn">账本记 0 过早</span>，退款到账前应记 ¥116</td></tr>
+  </table>
+
+  <h2>四、截图订单明细（62 笔）</h2>
+  <table>
+    <tr><th>截图</th><th>店铺</th><th>商品</th><th class="r">实付(元)</th><th>状态</th></tr>
+    <tr><td>A</td><td>闪充数码馆</td><td>50W圆盘无线快充</td><td class="r">19.72</td><td>待评价</td></tr>
+    <tr><td>A</td><td>粤广好物优选小铺</td><td>智界R7/S7开门按键贴</td><td class="r">3.87</td><td>待评价</td></tr>
+    <tr><td>A</td><td>东诚家居用品店</td><td>不锈钢挂钩20只装</td><td class="r">3.88</td><td>待评价</td></tr>
+    <tr><td>A</td><td>顺顺五金铺</td><td>金属挂钩50只装</td><td class="r">3.48</td><td>待评价</td></tr>
+    <tr><td>A</td><td>津禾运动鞋服专营店</td><td>匹克态极5.0PRO跑鞋</td><td class="r">127.00</td><td>待评价</td></tr>
+    <tr><td>A</td><td>浅草之家</td><td>水芙蓉水培植物</td><td class="r">2.77</td><td>待评价</td></tr>
+    <tr><td>A</td><td>枫奕车品</td><td>智界R7水杯硅胶垫2件套</td><td class="r">26.60</td><td>待评价</td></tr>
+    <tr><td>A</td><td>成意商贸</td><td>水泥钉+垫片35套</td><td class="r">2.68</td><td>待评价</td></tr>
+    <tr><td>A</td><td>家居用品02</td><td>折叠床头柜置物架</td><td class="r">31.90</td><td>待评价</td></tr>
+    <tr><td>A</td><td>Heltboks核钼电脑</td><td>米家八键蓝牙Mesh开关</td><td class="r">50.30</td><td>待评价</td></tr>
+    <tr><td>A</td><td>津禾运动鞋服专营店</td><td>匹克态极5.0PRO跑鞋（第2单）</td><td class="r">127.00</td><td>退款成功（补偿运费5.70）</td></tr>
+    <tr><td>A</td><td>花颜巧屿</td><td>仿真花餐桌摆件</td><td class="r">6.90</td><td>交易成功</td></tr>
+    <tr><td>A</td><td>鸿艺百货店</td><td>气囊透明防撞条3.8cm</td><td class="r">19.68</td><td>交易成功</td></tr>
+    <tr><td>A</td><td>畅策家居</td><td>实木门后挂钩5钩</td><td class="r">14.00</td><td>交易成功</td></tr>
+    <tr><td>A</td><td>花颜巧屿</td><td>小雏菊仿真花束2束</td><td class="r">15.50</td><td>交易成功</td></tr>
+    <tr><td>A</td><td>深圳长丰胶粘用品</td><td>床头柜可折叠置物架</td><td class="r">24.80</td><td>退款成功（补偿3元）</td></tr>
+    <tr><td>A</td><td>星驰车业</td><td>电动车车筐带盖</td><td class="r">9.90</td><td>交易成功</td></tr>
+    <tr><td>B</td><td>森朗川SenLangChuan</td><td>青龙石英造景石3斤</td><td class="r">13.60</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>景森水族造景3</td><td>沉木柚木缸造景树桩2块</td><td class="r">10.10</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>大匠神彩官方旗舰店</td><td>火山石+水草泥底砂套餐</td><td class="r">28.80</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>蓝渔水族</td><td>超白玻璃极窄鱼缸50款</td><td class="r">62.00</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>拾光暖屋舍</td><td>黑胡桃双面相框8寸×1</td><td class="r">19.00</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>淘气哆梦母婴玩具旗舰店</td><td>儿童滑滑梯秋千组合</td><td class="r">208.00</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>SYQC花卉</td><td>火山石颗粒底砂450克</td><td class="r">2.86</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>鱼儿有瓜水宠</td><td>清道夫金苔鼠清洁鱼3条</td><td class="r">3.97</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>凑凑精选百货</td><td>婴儿辅食小风扇</td><td class="r">35.90</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>悠悠青水族</td><td>深水黄耳龟一公一母</td><td class="r">7.57</td><td>已签收待确认</td></tr>
+    <tr><td>B</td><td>洁丽雅家居鞋旗舰店</td><td>亚麻拖鞋月影白40-41</td><td class="r">32.90</td><td>待评价</td></tr>
+    <tr><td>B</td><td>3M汽车用品专营店</td><td>3M双面胶泡棉20mm×4米</td><td class="r">8.82</td><td>待评价</td></tr>
+    <tr><td>B</td><td>跃屘家居生活</td><td>亚麻拖鞋白色40-41</td><td class="r">56.90</td><td>退款成功</td></tr>
+    <tr><td>B</td><td>优立方UCUBE</td><td>柜门拉手强力贴2只</td><td class="r">8.80</td><td>待评价</td></tr>
+    <tr><td>B</td><td>厨电卫浴家装</td><td>冰箱置盘架3层</td><td class="r">9.96</td><td>待评价</td></tr>
+    <tr><td>B</td><td>月之木缘</td><td>黑胡桃木手机支架</td><td class="r">6.07</td><td>待评价</td></tr>
+    <tr><td>B</td><td>筱简爱家居</td><td>伯格尼斯竹木手机支架</td><td class="r">1.56</td><td>待评价</td></tr>
+    <tr><td>B</td><td>金泰恒数码科技</td><td>无线投屏器（尊享款）</td><td class="r">27.99</td><td>退款成功</td></tr>
+    <tr><td>B</td><td>程宇康倍水族</td><td>鱼缸增氧片</td><td class="r">2.98</td><td>待评价</td></tr>
+    <tr><td>B</td><td>随便买点文化用品</td><td>鱼缸过滤棉浑水克星</td><td class="r">8.80</td><td>待评价</td></tr>
+    <tr><td>B</td><td>NANA五金</td><td>12寸抽屉滑轨×1</td><td class="r">17.60</td><td>待评价</td></tr>
+    <tr><td>B</td><td>刘小铺8205</td><td>墙面挂式置物架钉勾</td><td class="r">5.70</td><td>待评价</td></tr>
+    <tr><td>C</td><td>（店铺名被截断）</td><td>鱼缸硝化细菌净水剂260ml</td><td class="r">2.07</td><td>运输中</td></tr>
+    <tr><td>C</td><td>畅梦优选</td><td>鱼缸过滤羊绒棉2米</td><td class="r">2.50</td><td>待收货</td></tr>
+    <tr><td>C</td><td>阳仔渔场直发</td><td>黄金蓝眼大帆工具鱼</td><td class="r">12.80</td><td>待收货</td></tr>
+    <tr><td>C</td><td>格润花卉绿植专营店</td><td>迷你椒草阴性水草</td><td class="r">13.11</td><td>待收货</td></tr>
+    <tr><td>C</td><td>乐享一宠官方旗舰店</td><td>鱼缸过滤器四合一V5-5W</td><td class="r">30.00</td><td>待收货</td></tr>
+    <tr><td>C</td><td>余橙电子产品店</td><td>造景补光灯夹子定时LED</td><td class="r">34.80</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>一二三四水草</td><td>爬地矮珍珠2杯</td><td class="r">6.90</td><td>退款成功</td></tr>
+    <tr><td>C</td><td>好了你充电器</td><td>USB六口充电器（第1单）</td><td class="r">20.10</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>乐乐宠物用品馆</td><td>鱼缸换水虹吸管1.4米</td><td class="r">3.32</td><td>待收货</td></tr>
+    <tr><td>C</td><td>EYEY宠物用品官方旗舰店</td><td>灯科鱼饲料0.15mm 368g</td><td class="r">15.10</td><td>待收货（待取件）</td></tr>
+    <tr><td>C</td><td>逐玉居家店</td><td>捞鱼网兜大中小号</td><td class="r">5.90</td><td>待收货</td></tr>
+    <tr><td>C</td><td>静音球</td><td>静音篮球30CM吸盘篮筐</td><td class="r">13.00</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>好了你充电器</td><td>USB六口充电器（第2单）</td><td class="r">20.10</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>快乐鱼水族店</td><td>智能鱼缸灯L-40全光谱24W</td><td class="r">116.00</td><td>退货中（待用户寄回）</td></tr>
+    <tr><td>C</td><td>拾光暖屋舍</td><td>黑胡桃双面相框8寸×2</td><td class="r">38.00</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>青青彩印</td><td>照片冲洗6寸塑封10张</td><td class="r">9.62</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>NANA五金</td><td>12寸抽屉滑轨×2</td><td class="r">33.44</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>乐呵呵水草</td><td>红丝青叶水草15棵</td><td class="r">8.87</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>乐享一宠官方旗舰店</td><td>鱼缸过滤器四合一V3-3W</td><td class="r">23.32</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>乐呵呵水草</td><td>小红梅水草25棵</td><td class="r">10.30</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>一二三四水草</td><td>爬地矮珍珠3杯</td><td class="r">9.90</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>艾家的商铺32</td><td>造景骨架强力胶1瓶</td><td class="r">3.41</td><td>已签收待确认</td></tr>
+    <tr><td>C</td><td>镊子供应链</td><td>加长镊子20cm组合装</td><td class="r">2.66</td><td>已签收待确认</td></tr>
+  </table>
+
+  <h2>五、需要注意的误差来源</h2>
+  <ul>
+    <li>三张截图的<b>上下边缘各截断了约 4 笔订单</b>（截图A顶部1笔仅见按钮、A/B/C 底部各疑似 1 笔未入镜），实际总额可能<b>略高于 ¥1,505.08</b>。建议在 App「我的订单」页核对订单总数确认。</li>
+    <li>截图为长图缩放识别，个别金额（如 ¥33.44、¥19.72）建议抽查 1-2 笔。</li>
+    <li>两笔退款各含运费补偿（¥5.70、¥3.00），若你把补偿也算作收入可另行记一笔收入 ¥8.70。</li>
+    <li>水族灯 ¥116 目前「待寄回退货」，等你寄出、退款到账后，再把账本上这 ¥116 冲掉即可。</li>
+  </ul>
+
+  <div class="footer">生成于 2026-10-30 · 记账工具：jizhang（kevinxia.online:3000）· 明细数据另见 pdd_orders_2026-10-30.csv</div>
+</div>
+</body>
+</html>

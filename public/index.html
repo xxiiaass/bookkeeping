@@ -21,14 +21,20 @@
 
   <!-- 主界面 -->
   <div id="main-view" class="view hidden">
-    <!-- 顶栏：资产/负债 双 tab + 右侧趋势图标 -->
-    <header class="topbar">
-      <div class="topbar-left">
+    <!-- 顶栏：资产/负债 双 tab + 右侧图标（子页面显示返回 + 标题） -->
+    <header class="topbar" id="topbar">
+      <div class="topbar-left" id="topbar-tabs">
         <button class="tab active" data-tab="assets">资产</button>
         <button class="tab" data-tab="liabilities">负债</button>
       </div>
-      <button class="topbar-icon" id="go-trend" title="趋势" style="margin-right:8px">📉</button>
-      <button class="topbar-icon" id="go-report" title="报表">📊</button>
+      <div class="topbar-sub hidden" id="topbar-sub">
+        <button class="topbar-back" id="topbar-back" aria-label="返回">‹</button>
+        <span class="topbar-title" id="topbar-title"></span>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-icon" id="go-trend" title="趋势">📉</button>
+        <button class="topbar-icon" id="go-report" title="报表">📊</button>
+      </div>
     </header>
 
     <!-- 汇总卡片 -->

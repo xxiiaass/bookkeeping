@@ -14,7 +14,8 @@ import { categoriesRouter } from './src/routes/categories.js';
 import { snapshotsRouter } from './src/routes/snapshots.js';
 import { scheduleBackup } from './src/backup.js';
 import { runDue } from './src/domain/periodic.js';
-import { snapshotToday } from './src/domain/snapshots.js';
+import { snapshotToday, ensureSnapshot } from './src/domain/snapshots.js';
+import { localDate } from './src/domain/date.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -68,23 +69,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.join(__dirname, 's
   }, 60 * 1000);
 
   // 每分钟检查一次：到期时执行资产快照 / 邮件备份
+  // 注意：日期一律用「本地日期」，不能用 toISOString()（那是 UTC，东八区会错位到 8 点）
   let lastSnapshotDate = '';
   let lastBackupDate = '';
   const dailyTimer = setInterval(() => {
     const now = new Date();
-    const today = now.toISOString().slice(0, 10);
-    const hour = now.getHours();
+    const today = localDate(now);
     const dateNum = now.getDate();
-    // 每天 0 点后第一次触发快照
-    if (hour >= 0 && lastSnapshotDate !== today) {
+    // 每到新的一天（0 点后第一次检查）记录一次快照
+    if (lastSnapshotDate !== today) {
       try {
         const r = snapshotToday(db, today);
         lastSnapshotDate = today;
-        console.log(`[snapshot] ${r.date} shown=${(r.shownTotal/100).toFixed(2)} all=${(r.allTotal/100).toFixed(2)}`);
+        console.log(`[snapshot] ${r.date} shown=${(r.shownTotal / 100).toFixed(2)} all=${(r.allTotal / 100).toFixed(2)}`);
       } catch (e) { console.error('[snapshot] 失败:', e.message); }
     }
-    // 每月 1、15 号 0 点后第一次触发备份
-    if (hour >= 0 && (dateNum === 1 || dateNum === 15) && lastBackupDate !== today) {
+    // 每月 1、15 号自动发备份邮件
+    if ((dateNum === 1 || dateNum === 15) && lastBackupDate !== today) {
       lastBackupDate = today;
       import('./src/backup.js').then(({ sendBackup }) =>
         sendBackup(db, path.join(__dirname, 'data', 'zhangben.db'))
@@ -94,9 +95,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.join(__dirname, 's
     }
   }, 60 * 1000);
 
-  // 启动时立即记录一次今日快照（补齐当天数据）
+  // 启动时补齐当天快照（已存在则不覆盖，避免重启把 0 点的值改掉）
   try {
-    snapshotToday(db, new Date().toISOString().slice(0, 10));
+    const r = ensureSnapshot(db, localDate());
+    lastSnapshotDate = r.date;
+    console.log(`[snapshot] 启动检查 ${r.date} ${r.existed ? '已存在，跳过' : '已补齐'}`);
   } catch (e) { console.error('[snapshot] 启动快照失败:', e.message); }
 
   process.on('SIGINT', () => {

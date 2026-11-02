@@ -1,12 +1,16 @@
 import express from 'express';
 import { listEntries, getEntry, addEntry, updateEntry, deleteEntry, balance } from '../domain/entries.js';
+import { localDate } from '../domain/date.js';
 
 export function entriesRouter(db) {
   const r = express.Router();
 
   r.get('/', (req, res) => {
-    const { month, limit } = req.query;
-    res.json({ entries: listEntries(db, { month, limit: limit ? Number(limit) : 500 }) });
+    const { month, limit, category, type } = req.query;
+    res.json({ entries: listEntries(db, {
+      month, category, type,
+      limit: limit ? Number(limit) : 500,
+    }) });
   });
 
   r.post('/', (req, res) => {
@@ -17,7 +21,7 @@ export function entriesRouter(db) {
   // 平账：清零现金
   r.post('/balance', (req, res) => {
     const { date, note } = req.body || {};
-    const result = balance(db, date || new Date().toISOString().slice(0, 10), { note });
+    const result = balance(db, date || localDate(), { note });
     res.json(result);
   });
 

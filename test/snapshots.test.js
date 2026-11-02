@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import Database from 'better-sqlite3';
 import { initDb } from '../src/db.js';
-import { computeTotals, snapshotToday, listSnapshots } from '../src/domain/snapshots.js';
+import { computeTotals, snapshotToday, listSnapshots, ensureSnapshot } from '../src/domain/snapshots.js';
 import { createAccount } from '../src/domain/accounts.js';
+import { localDate, localMonth } from '../src/domain/date.js';
 
 function setup() {
   const db = new Database(':memory:');
@@ -43,7 +44,7 @@ test('snapshotToday: 记录并更新', () => {
   snapshotToday(db, '2026-10-29');
   const list = listSnapshots(db, {});
   assert.strictEqual(list.length, 1);
-  assert.strictEqual(list[list.length - 1].all_total, 9900);
+  assert.strictEqual(list[list.length - 1].allTotal, 9900);
 });
 
 test('listSnapshots: 日期过滤', () => {
@@ -54,4 +55,33 @@ test('listSnapshots: 日期过滤', () => {
   const list = listSnapshots(db, { from: '2026-10-10', to: '2026-10-20' });
   assert.strictEqual(list.length, 1);
   assert.strictEqual(list[0].date, '2026-10-15');
+});
+
+test('localDate: 使用本地时区而非 UTC', () => {
+  // 东八区 2026-10-30 00:30 对应 UTC 2026-10-29 16:30
+  const d = new Date('2026-10-29T16:30:00Z');
+  const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  assert.strictEqual(localDate(d), expected);
+  assert.strictEqual(localMonth(d), expected.slice(0, 7));
+  // 格式正确
+  assert.match(localDate(d), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('ensureSnapshot: 缺失时补齐，已存在不覆盖', () => {
+  const db = setup();
+  createAccount(db, { name: 'A', type: 'asset', balance: 1000, shown: 1 });
+  const r1 = ensureSnapshot(db, '2026-10-30');
+  assert.strictEqual(r1.existed, false);
+  assert.strictEqual(r1.allTotal, 1000);
+
+  // 改余额后再 ensure，不应覆盖已有值
+  createAccount(db, { name: 'B', type: 'asset', balance: 5000, shown: 1 });
+  const r2 = ensureSnapshot(db, '2026-10-30');
+  assert.strictEqual(r2.existed, true);
+  assert.strictEqual(r2.allTotal, 1000);
+
+  // 新的一天会补进新值
+  const r3 = ensureSnapshot(db, '2026-10-31');
+  assert.strictEqual(r3.existed, false);
+  assert.strictEqual(r3.allTotal, 6000);
 });

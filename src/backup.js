@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { localDate } from './domain/date.js';
 
 // 邮件备份：SMTP 配置存在时，定期把 .db 文件作为附件发到指定邮箱
 export function getSmtpConfig(db) {
@@ -46,7 +47,7 @@ export async function sendBackup(db, dbPath) {
     auth: { user: cfg.user, pass: cfg.pass },
   });
 
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const dateStr = localDate();
   try {
     await transporter.sendMail({
       from: cfg.from || cfg.user,
